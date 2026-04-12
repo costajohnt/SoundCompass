@@ -176,16 +176,53 @@ The watch target is embedded into the iOS app and wired to it through
 > Once generated, flip the **Signing & Capabilities → Team** on both app
 > targets to your own development team before building on a device.
 
-## Running the app
+## Installing on your iPhone
 
-1. `xcodegen generate && open SoundCompass.xcodeproj`
-2. Choose your personal Team for both `SoundCompass` and `SoundCompassWatch`.
-3. Build & run on a physical iPhone — the Simulator does not expose the
-   multi-mic array, so direction estimates will be meaningless there.
-4. Grant microphone access, then tap **Start listening**.
-5. Hold the phone flat in front of you, screen up, top edge pointing forward.
-6. Pair the Watch app from the Watch companion app on the phone to mirror the
-   compass on your wrist.
+You need a Mac with Xcode. No paid Apple Developer account required —
+a free Apple ID works for sideloading to your own device.
+
+1. **Clone and generate:**
+   ```sh
+   git clone https://github.com/costajohnt/SoundCompass.git
+   cd SoundCompass
+   brew install xcodegen
+   xcodegen generate
+   open SoundCompass.xcodeproj
+   ```
+2. **Sign into Xcode** — Xcode → Settings (⌘,) → Accounts → click +
+   → Apple ID. Sign in with the same Apple ID that's on your iPhone.
+3. **Set your Team** — click the SoundCompass project in the left
+   sidebar, then for each target under Signing & Capabilities, pick
+   your Personal Team from the Team dropdown.
+4. **Change the bundle ID** — find-replace `com.soundcompass.app` with
+   something unique to you (e.g. `com.yourname.soundcompass`) in
+   `project.yml`, then re-run `xcodegen generate`. This is needed
+   because Apple ties signing to bundle IDs.
+5. **Plug in your iPhone** via USB. Trust the computer if prompted.
+   Select your phone from Xcode's device dropdown (top bar).
+6. **Build and run** — hit ⌘R. Xcode will build, install, and launch
+   the app on your phone.
+7. **Trust the developer certificate** — if you see "Untrusted
+   Developer" on your phone, go to Settings → General → VPN & Device
+   Management → tap your Apple ID → Trust.
+8. **Grant permissions** — the app will ask for microphone and motion
+   access on first launch. Grant both.
+
+The free Apple ID signing certificate expires after 7 days. Just
+plug in and hit ⌘R again to re-sign. If that gets annoying, a
+$99/year Apple Developer account gives you a year-long certificate.
+
+## Using the app
+
+1. Tap **Start listening**.
+2. Hold the phone flat in your palm, screen up, top edge pointing
+   the direction you're facing — like a real compass.
+3. The arrow swings toward the loudest sound. The label underneath
+   tells you the direction and loudness.
+4. Open **Settings** (gear icon) to adjust sensitivity, enable
+   spoken direction cues, or try the CROS audio passthrough with
+   headphones.
+5. Optional: pair an Apple Watch to mirror the compass on your wrist.
 
 ## Running the tests
 
