@@ -1,0 +1,95 @@
+/*
+  Localizable.strings (Spanish)
+  SoundCompass
+
+  Spanish translation of the user-facing strings. Keys mirror the
+  English base file in en.lproj/Localizable.strings and must not
+  change.
+*/
+
+// MARK: - Header
+
+"SoundCompass" = "SoundCompass";
+"Hold your phone flat, screen up, pointing forward." = "Sujeta el teléfono horizontalmente, con la pantalla hacia arriba, apuntando hacia delante.";
+
+// MARK: - Direction readout
+
+"Far left" = "Muy a la izquierda";
+"Left" = "Izquierda";
+"Straight ahead" = "De frente";
+"Right" = "Derecha";
+"Far right" = "Muy a la derecha";
+"Current direction" = "Dirección actual";
+
+// MARK: - Front/back banner
+
+"Front or back?" = "¿Delante o detrás?";
+"Turn your body slowly — I'll tell you if the sound is actually in front of you or behind." = "Gira el cuerpo lentamente — te diré si el sonido viene de delante o de detrás.";
+"Sound is in front of you" = "El sonido viene de delante";
+"Sound is behind you" = "El sonido viene de detrás";
+"Rotation-confirmed." = "Confirmado por rotación.";
+"Rotation-confirmed. The on-screen compass mirrors the true direction." = "Confirmado por rotación. La brújula en pantalla refleja la dirección real.";
+
+// MARK: - Band grid
+
+"Frequency bands" = "Bandas de frecuencia";
+"Low" = "Graves";
+"Speech" = "Voz";
+"Alert" = "Alerta";
+"High" = "Agudos";
+
+// MARK: - Warnings
+
+"This microphone only provides mono audio. Direction cannot be estimated — try the built-in mic instead of a headset." = "Este micrófono solo entrega audio mono. No es posible estimar la dirección — prueba con el micrófono integrado en lugar de un auricular.";
+"Microphone access was denied. Enable it in Settings to use SoundCompass." = "El acceso al micrófono fue denegado. Actívalo en Ajustes para usar SoundCompass.";
+
+// MARK: - Controls
+
+"Start listening" = "Empezar a escuchar";
+"Stop listening" = "Dejar de escuchar";
+"Stops the microphone and the sound direction estimator." = "Detiene el micrófono y el estimador de dirección.";
+"Starts listening to nearby sounds and estimates where they come from." = "Empieza a escuchar los sonidos cercanos y estima su dirección.";
+"Settings" = "Ajustes";
+"Dismiss front and back tip" = "Descartar aviso de delante y detrás";
+
+// MARK: - Settings sheet
+
+"Responsiveness" = "Capacidad de respuesta";
+"Sensitivity" = "Sensibilidad";
+"Controls how quickly the arrow follows new sounds vs. how much it smooths out jitter." = "Controla la rapidez con la que la flecha sigue a los sonidos nuevos frente a cuánto suaviza las fluctuaciones.";
+"Calm" = "Tranquila";
+"Balanced" = "Equilibrada";
+"Snappy" = "Ágil";
+"Smoothest, slowest to react. Good for background monitoring." = "Muy suave, lenta al reaccionar. Útil para monitoreo en segundo plano.";
+"Default balance between responsiveness and stability." = "Equilibrio predeterminado entre respuesta y estabilidad.";
+"Jumps to new directions immediately. Good for brief, loud sounds." = "Salta a nuevas direcciones al instante. Útil para sonidos cortos y fuertes.";
+
+"Haptics" = "Hápticos";
+"Haptic strength" = "Intensidad háptica";
+"Off" = "Desactivada";
+"Light" = "Suave";
+"Strong" = "Fuerte";
+
+"Speech" = "Voz";
+"Speak direction" = "Anunciar dirección";
+"Speech rate" = "Velocidad de voz";
+
+"Developer" = "Desarrollo";
+"Show DSP stats" = "Mostrar estadísticas de DSP";
+"Show walkthrough again" = "Volver a mostrar la guía";
+"Apple's SSD hearing resources" = "Recursos de audición SSD de Apple";
+"Done" = "Listo";
+
+// MARK: - Onboarding
+
+"Welcome to SoundCompass" = "Te damos la bienvenida a SoundCompass";
+"A few things to know before you start." = "Algunas cosas antes de empezar.";
+"Hold the phone flat" = "Sujeta el teléfono en horizontal";
+"Rest it on your palm, screen facing up, top edge pointing the way you're facing. The compass is calibrated for that orientation." = "Apóyalo en la palma, pantalla hacia arriba, el borde superior apuntando hacia delante. La brújula está calibrada para esa orientación.";
+"Microphone access" = "Acceso al micrófono";
+"SoundCompass uses the phone's built-in stereo microphone array. No audio ever leaves your device." = "SoundCompass usa los micrófonos estéreo integrados del teléfono. El audio nunca sale de tu dispositivo.";
+"Front and back can look the same" = "Delante y detrás pueden parecer iguales";
+"A two-microphone array cannot tell whether a sound is in front of you or behind you. If the arrow feels wrong, turn your body 90° — the direction will swing as you rotate, which confirms where the sound really is." = "Un par de micrófonos no puede distinguir si un sonido viene de delante o de detrás. Si la flecha parece incorrecta, gira el cuerpo 90° — la dirección se moverá al girar, lo que confirma dónde está realmente el sonido.";
+"Use the built-in mic, not a headset" = "Usa el micrófono integrado, no un auricular";
+"Bluetooth and wired headsets deliver a single mono channel, so direction cannot be estimated. SoundCompass will warn you if it detects a mono input." = "Los auriculares Bluetooth y con cable entregan un solo canal mono, así que no se puede estimar la dirección. SoundCompass te avisará si detecta una entrada mono.";
+"Got it" = "Entendido";

@@ -1,0 +1,195 @@
+name: SoundCompass
+options:
+  bundleIdPrefix: com.soundcompass
+  deploymentTarget:
+    iOS: "18.0"
+    watchOS: "11.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  xcodeVersion: "26.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+
+  # ---------------------------------------------------------------
+  # iOS app target
+  # ---------------------------------------------------------------
+  SoundCompass:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: SoundCompass
+      - path: Shared
+    info:
+      path: SoundCompass/Info.plist
+      properties:
+        CFBundleDisplayName: SoundCompass
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSRequiresIPhoneOS: true
+        NSMicrophoneUsageDescription: SoundCompass uses the microphone to estimate where nearby sounds are coming from so it can show you their direction on screen.
+        NSMotionUsageDescription: SoundCompass uses device motion to disambiguate whether a sound is coming from in front of you or behind you when you rotate the phone.
+        NSSupportsLiveActivities: true
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageRespectsSafeAreaInsets: true
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIRequiredDeviceCapabilities:
+          - arm64
+          - microphone
+        UIBackgroundModes:
+          - audio
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.soundcompass.app
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+    dependencies:
+      - target: SoundCompassWatch
+        embed: true
+      - target: SoundCompassWidgets
+        embed: true
+
+  # ---------------------------------------------------------------
+  # watchOS companion target (SwiftUI single-target app)
+  # ---------------------------------------------------------------
+  SoundCompassWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "11.0"
+    sources:
+      - path: SoundCompassWatch
+      - path: Shared/CompassView.swift
+      - path: Shared/DirectionLabel.swift
+      - path: Shared/DirectionUpdate.swift
+    info:
+      path: SoundCompassWatch/Info.plist
+      properties:
+        CFBundleDisplayName: SoundCompass
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        WKApplication: true
+        WKWatchOnly: false
+        WKCompanionAppBundleIdentifier: com.soundcompass.app
+        UILaunchScreen: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.soundcompass.app.watchkitapp
+        TARGETED_DEVICE_FAMILY: "4"
+        INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.soundcompass.app
+    dependencies:
+      - target: SoundCompassWatchWidgets
+        embed: true
+
+  # ---------------------------------------------------------------
+  # watchOS widget / complication extension
+  # ---------------------------------------------------------------
+  SoundCompassWatchWidgets:
+    type: app-extension
+    platform: watchOS
+    deploymentTarget: "11.0"
+    sources:
+      - path: SoundCompassWatchWidgets
+      - path: Shared/DirectionLabel.swift
+    info:
+      path: SoundCompassWatchWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: SoundCompass Complication
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.soundcompass.app.watchkitapp.widgets
+        TARGETED_DEVICE_FAMILY: "4"
+
+  # ---------------------------------------------------------------
+  # WidgetKit extension for Lock Screen / Dynamic Island Live Activity
+  # ---------------------------------------------------------------
+  SoundCompassWidgets:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: SoundCompassWidgets
+      - path: Shared/SoundCompassActivityAttributes.swift
+    info:
+      path: SoundCompassWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: SoundCompass Widgets
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.soundcompass.app.widgets
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_EMIT_LOC_STRINGS: "YES"
+
+  # ---------------------------------------------------------------
+  # Unit tests for the iOS target (DSP + shared code)
+  # ---------------------------------------------------------------
+  SoundCompassTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: SoundCompassTests
+    dependencies:
+      - target: SoundCompass
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.soundcompass.app.tests
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/SoundCompass.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SoundCompass"
+
+schemes:
+  SoundCompass:
+    build:
+      targets:
+        SoundCompass: all
+        SoundCompassWatch: all
+        SoundCompassWatchWidgets: all
+        SoundCompassWidgets: all
+        SoundCompassTests: [test]
+    test:
+      targets:
+        - SoundCompassTests
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  SoundCompass-iOS:
+    build:
+      targets:
+        SoundCompass: all
+        SoundCompassWidgets: all
+        SoundCompassTests: [test]
+    test:
+      targets:
+        - SoundCompassTests
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
