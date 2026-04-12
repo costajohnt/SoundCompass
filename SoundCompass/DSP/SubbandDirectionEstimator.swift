@@ -58,7 +58,7 @@ final class SubbandDirectionEstimator {
         right: UnsafePointer<Float>,
         frameCount: Int
     ) -> [BandResult] {
-        precondition(frameCount <= self.frameCount, "buffer larger than configured frameCount")
+        let frameCount = min(frameCount, self.frameCount)
 
         var results: [BandResult] = []
         results.reserveCapacity(bands.count)

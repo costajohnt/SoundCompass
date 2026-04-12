@@ -200,11 +200,10 @@ final class AudioDirectionDetector: ObservableObject {
                     try self.configureSession()
                     try self.installTap()
                     try self.engine.start()
+                    self.isRunning = true
+                    self.lastError = nil
+                    self.sessionStats.begin()
                     self.frontBackResolver.start()
-                    self.liveActivity.start()
-                    Log.lifecycle.info("AudioDirectionDetector started")
-                    // Engage CROS passthrough if the user has it turned on
-                    // and headphones are connected.
                     let pan: Float
                     switch self.settings.hearingEar {
                     case .left:  pan = -1.0
@@ -212,11 +211,8 @@ final class AudioDirectionDetector: ObservableObject {
                     case .unspecified: pan = 0
                     }
                     self.passthroughMixer.setEnabled(self.settings.passthroughEnabled, pan: pan)
-                    self.sessionStats.begin()
-                    self.lastError = nil
-                    self.isRunning = true
+                    self.liveActivity.start()
                 } catch {
-                    Log.lifecycle.error("Failed to start detector: \(error.localizedDescription, privacy: .public)")
                     self.lastError = "Could not start audio: \(error.localizedDescription)"
                 }
             }
@@ -340,30 +336,50 @@ final class AudioDirectionDetector: ObservableObject {
     private func configureSession() throws {
         try session.setCategory(
             .playAndRecord,
-            mode: .measurement,
-            options: [.allowBluetoothHFP, .defaultToSpeaker]
+            mode: .default,
+            options: [.defaultToSpeaker]
         )
 
-        // Prefer the built-in mic so we get the multi-element array, not a
-        // Bluetooth headset which is mono from our point of view.
+        // Prefer the built-in mic so we get the multi-element array.
         if let builtIn = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
             try session.setPreferredInput(builtIn)
-            if let stereoSource = builtIn.dataSources?.first(where: {
-                $0.supportedPolarPatterns?.contains(.stereo) ?? false
-            }) {
-                try stereoSource.setPreferredPolarPattern(.stereo)
-                try builtIn.setPreferredDataSource(stereoSource)
+
+            Log.audio.info("Built-in mic: \(builtIn.portName, privacy: .public)")
+            Log.audio.info("Data sources: \(builtIn.dataSources?.count ?? 0)")
+
+            // Log every data source and its polar patterns so we can see
+            // what this device actually supports.
+            var foundStereo = false
+            for source in builtIn.dataSources ?? [] {
+                let patterns = source.supportedPolarPatterns?.map(\.rawValue) ?? []
+                Log.audio.info("  Source: \(source.dataSourceName, privacy: .public) patterns: \(patterns, privacy: .public)")
+                if !foundStereo, source.supportedPolarPatterns?.contains(.stereo) == true {
+                    try source.setPreferredPolarPattern(.stereo)
+                    try builtIn.setPreferredDataSource(source)
+                    Log.audio.info("  → Selected for stereo")
+                    foundStereo = true
+                }
             }
+
+            if !foundStereo {
+                Log.audio.warning("No data source with stereo polar pattern found")
+            }
+        } else {
+            Log.audio.warning("No built-in mic found in available inputs")
         }
 
         try session.setPreferredInputOrientation(.portrait)
         try session.setActive(true, options: [])
+
+        // Log what the session actually gave us after activation.
+        Log.audio.info("Session active — input channels: \(self.session.inputNumberOfChannels), sample rate: \(self.session.sampleRate)")
     }
 
     private func installTap() throws {
         let input = engine.inputNode
         let format = input.inputFormat(forBus: 0)
         let channels = Int(format.channelCount)
+        Log.audio.info("Engine input format: \(channels) ch, \(format.sampleRate) Hz, \(format.commonFormat.rawValue)")
         isMono = channels < 2
 
         // Size-check and allocate DSP. GCC-PHAT buffers are allocated once.

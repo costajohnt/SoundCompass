@@ -64,7 +64,9 @@ final class DirectionEstimator {
         right: UnsafePointer<Float>,
         frameCount: Int
     ) -> DirectionEstimate {
-        precondition(frameCount <= self.frameCount, "buffer larger than configured frameCount")
+        // Clamp to configured size — installTap's bufferSize is a hint,
+        // the system can deliver larger buffers.
+        let frameCount = min(frameCount, self.frameCount)
 
         // Per-channel RMS via Accelerate.
         var leftRms: Float = 0

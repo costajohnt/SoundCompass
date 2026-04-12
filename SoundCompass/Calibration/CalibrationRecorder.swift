@@ -86,7 +86,7 @@ final class CalibrationRecorder: ObservableObject {
     }
 
     private func configureSession() throws {
-        try session.setCategory(.playAndRecord, mode: .measurement, options: [.allowBluetoothHFP, .defaultToSpeaker])
+        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
         if let builtIn = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
             try session.setPreferredInput(builtIn)
             if let stereoSource = builtIn.dataSources?.first(where: {

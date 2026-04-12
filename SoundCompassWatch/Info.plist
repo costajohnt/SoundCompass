@@ -25,7 +25,7 @@
 	<key>WKApplication</key>
 	<true/>
 	<key>WKCompanionAppBundleIdentifier</key>
-	<string>com.soundcompass.app</string>
+	<string>com.costajohnt.soundcompass</string>
 	<key>WKWatchOnly</key>
 	<false/>
 </dict>

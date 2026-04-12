@@ -69,14 +69,15 @@ final class SoundClassifier: ObservableObject {
         }
     }
 
-    /// Feed a buffer to the classifier. The buffer is copied before the
-    /// async dispatch because AVAudioEngine may recycle the original
-    /// buffer after the tap callback returns.
+    /// Feed a buffer to the classifier. The buffer is dispatched to the
+    /// analysis queue by reference — AVAudioEngine retains tap buffers
+    /// until the next callback, so the analyzer has time to read it
+    /// before it's recycled. Do NOT copy the buffer here; heap
+    /// allocation on the real-time audio thread crashes the app.
     func analyze(buffer: AVAudioPCMBuffer, at time: AVAudioTime) {
-        guard let copy = buffer.copy() as? AVAudioPCMBuffer else { return }
         let framePosition = time.sampleTime
         analysisQueue.async { [weak self] in
-            self?.streamAnalyzer?.analyze(copy, atAudioFramePosition: framePosition)
+            self?.streamAnalyzer?.analyze(buffer, atAudioFramePosition: framePosition)
         }
     }
 

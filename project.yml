@@ -13,7 +13,7 @@ settings:
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: "554J63A469"
     CODE_SIGN_STYLE: Automatic
 
 targets:
@@ -51,12 +51,15 @@ targets:
           - audio
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.soundcompass.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.costajohnt.soundcompass
         TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        SWIFT_OBJC_BRIDGING_HEADER: SoundCompass/SoundCompass-Bridging-Header.h
     dependencies:
-      - target: SoundCompassWatch
-        embed: true
+      # Watch target requires a paired Apple Watch for free provisioning.
+      # Uncomment when building with a paid developer account.
+      # - target: SoundCompassWatch
+      #   embed: true
       - target: SoundCompassWidgets
         embed: true
 
@@ -80,13 +83,13 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         WKApplication: true
         WKWatchOnly: false
-        WKCompanionAppBundleIdentifier: com.soundcompass.app
+        WKCompanionAppBundleIdentifier: com.costajohnt.soundcompass
         UILaunchScreen: {}
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.soundcompass.app.watchkitapp
+        PRODUCT_BUNDLE_IDENTIFIER: com.costajohnt.soundcompass.watchkitapp
         TARGETED_DEVICE_FAMILY: "4"
-        INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.soundcompass.app
+        INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.costajohnt.soundcompass
     dependencies:
       - target: SoundCompassWatchWidgets
         embed: true
@@ -111,7 +114,7 @@ targets:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.soundcompass.app.watchkitapp.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.costajohnt.soundcompass.watchkitapp.widgets
         TARGETED_DEVICE_FAMILY: "4"
 
   # ---------------------------------------------------------------
@@ -134,7 +137,7 @@ targets:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.soundcompass.app.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.costajohnt.soundcompass.widgets
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_EMIT_LOC_STRINGS: "YES"
 
@@ -151,7 +154,7 @@ targets:
       - target: SoundCompass
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.soundcompass.app.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.costajohnt.soundcompass.tests
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/SoundCompass.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SoundCompass"
 
