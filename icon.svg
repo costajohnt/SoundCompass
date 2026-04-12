@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0B1A2E"/>
+      <stop offset="100%" stop-color="#060E1A"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="bigGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="22" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Mask to show only the front-facing wedge of the rings -->
+    <clipPath id="wedge">
+      <path d="M 512 490 L 200 50 L 824 50 Z"/>
+    </clipPath>
+    <clipPath id="wideWedge">
+      <path d="M 512 490 L 100 100 L 924 100 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+
+  <!-- Full 360 rings (faint, background context) -->
+  <circle cx="512" cy="490" r="400" fill="none" stroke="#00B0FF" stroke-width="5" opacity="0.04"/>
+  <circle cx="512" cy="490" r="310" fill="none" stroke="#00B0FF" stroke-width="5" opacity="0.06"/>
+  <circle cx="512" cy="490" r="220" fill="none" stroke="#00C8FF" stroke-width="5" opacity="0.08"/>
+  <circle cx="512" cy="490" r="130" fill="none" stroke="#00D4FF" stroke-width="5" opacity="0.10"/>
+
+  <!-- Bright wedge — doppler rings only in the direction the needle points -->
+  <g clip-path="url(#wideWedge)">
+    <!-- Ring 5 -->
+    <circle cx="512" cy="490" r="400" fill="none" stroke="#0077CC" stroke-width="10" opacity="0.12"/>
+    <!-- Ring 4 -->
+    <circle cx="512" cy="490" r="310" fill="none" stroke="#0091EA" stroke-width="14" opacity="0.2"/>
+    <!-- Ring 3 -->
+    <circle cx="512" cy="490" r="220" fill="none" stroke="#00B0FF" stroke-width="18" opacity="0.35" filter="url(#glow)"/>
+    <!-- Ring 2 -->
+    <circle cx="512" cy="490" r="130" fill="none" stroke="#00D4FF" stroke-width="24" opacity="0.5" filter="url(#glow)"/>
+    <!-- Ring 1 -->
+    <circle cx="512" cy="490" r="60" fill="none" stroke="#00E5FF" stroke-width="28" opacity="0.65" filter="url(#glow)"/>
+  </g>
+
+  <!-- Center source -->
+  <circle cx="512" cy="490" r="32" fill="#00E5FF" opacity="0.7" filter="url(#bigGlow)"/>
+  <circle cx="512" cy="490" r="18" fill="#FFFFFF" opacity="0.95"/>
+
+  <!-- Needle pointing straight up -->
+  <g filter="url(#glow)">
+    <line x1="512" y1="490" x2="512" y2="140" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" opacity="0.92"/>
+  </g>
+
+  <!-- Needle tip -->
+  <circle cx="512" cy="140" r="8" fill="#FFFFFF" opacity="0.9"/>
+
+  <!-- Short tail -->
+  <line x1="512" y1="490" x2="512" y2="580" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" opacity="0.2"/>
+
+  <!-- Subtle "direction detected" text arc would go here in the app -->
+</svg>
