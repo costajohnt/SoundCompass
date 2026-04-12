@@ -79,7 +79,7 @@ final class FrontBackResolverTests: XCTestCase {
         sweep(resolver: resolver, from: 0, to: yawSweep, source: 0.2, front: true)
         waitForMain()
 
-        resolver.reset()
+        resolver._resetForTesting()
 
         XCTAssertEqual(resolver.resolution, .unknown)
         XCTAssertEqual(resolver.yawRangeDegrees, 0, accuracy: 0.0001)

@@ -115,33 +115,49 @@ final class FrontBackResolver: ObservableObject {
 
     func stop() {
         motion.stopDeviceMotionUpdates()
-        DispatchQueue.main.async { [weak self] in
-            self?.reset()
+        queue.addOperation { [weak self] in
+            guard let self else { return }
+            self.samples.removeAll(keepingCapacity: true)
+            self.previousRawYaw = nil
+            self.cumulativeYaw = 0
+            DispatchQueue.main.async {
+                self.resolution = .unknown
+                self.yawRangeDegrees = 0
+                self.slope = 0
+            }
         }
     }
 
-    /// Clears the sample window. Call on start/stop listening so stale
-    /// rotations from before a new session don't poison the estimate.
+    /// Clears the sample window. Must be called on the motion queue or
+    /// when no motion updates are active.
     func reset() {
-        samples.removeAll(keepingCapacity: true)
-        previousRawYaw = nil
-        cumulativeYaw = 0
-        resolution = .unknown
-        yawRangeDegrees = 0
-        slope = 0
+        queue.addOperation { [weak self] in
+            guard let self else { return }
+            self.samples.removeAll(keepingCapacity: true)
+            self.previousRawYaw = nil
+            self.cumulativeYaw = 0
+            DispatchQueue.main.async {
+                self.resolution = .unknown
+                self.yawRangeDegrees = 0
+                self.slope = 0
+            }
+        }
     }
 
     // MARK: - Ingestion
 
-    /// Called by `AudioDirectionDetector` after each DSP update on the
-    /// main thread. Pairs the current smoothed direction with the most
-    /// recent cumulative yaw and re-runs the regression.
+    /// Called by `AudioDirectionDetector` after each DSP update.
+    /// Dispatches onto the motion queue so all access to `samples`,
+    /// `cumulativeYaw`, and `previousRawYaw` is serialized.
     func recordDirection(_ direction: Double) {
-        samples.append((yaw: cumulativeYaw, direction: direction))
-        if samples.count > maxSamples {
-            samples.removeFirst(samples.count - maxSamples)
+        queue.addOperation { [weak self] in
+            guard let self else { return }
+            self.samples.append((yaw: self.cumulativeYaw, direction: direction))
+            if self.samples.count > self.maxSamples {
+                self.samples.removeFirst(self.samples.count - self.maxSamples)
+            }
+            self.updateResolution()
         }
-        updateResolution()
     }
 
     private func ingestYaw(_ rawYaw: Double) {
@@ -229,10 +245,34 @@ final class FrontBackResolver: ObservableObject {
 #if DEBUG
 extension FrontBackResolver {
     /// Test-only: feed synthetic (yaw, direction) samples directly without
-    /// going through CoreMotion. Used by `FrontBackResolverTests`.
+    /// going through CoreMotion. Runs synchronously on the motion queue
+    /// so test assertions can read results immediately after.
     func _injectForTesting(yaw: Double, direction: Double) {
-        cumulativeYaw = yaw
-        recordDirection(direction)
+        queue.addOperations([BlockOperation { [self] in
+            self.cumulativeYaw = yaw
+            self.samples.append((yaw: yaw, direction: direction))
+            if self.samples.count > self.maxSamples {
+                self.samples.removeFirst(self.samples.count - self.maxSamples)
+            }
+            self.updateResolution()
+        }], waitUntilFinished: true)
+        // Drain the main queue so @Published updates land before assertions.
+        RunLoop.main.run(until: Date())
+    }
+
+    /// Test-only: synchronously reset state.
+    func _resetForTesting() {
+        queue.addOperations([BlockOperation { [self] in
+            self.samples.removeAll(keepingCapacity: true)
+            self.previousRawYaw = nil
+            self.cumulativeYaw = 0
+        }], waitUntilFinished: true)
+        DispatchQueue.main.async { [self] in
+            self.resolution = .unknown
+            self.yawRangeDegrees = 0
+            self.slope = 0
+        }
+        RunLoop.main.run(until: Date())
     }
 }
 #endif

@@ -41,6 +41,7 @@ final class CalibrationRecorder: ObservableObject {
 
     private let engine = AVAudioEngine()
     private let session = AVAudioSession.sharedInstance()
+    private let appendQueue = DispatchQueue(label: "com.soundcompass.calibration.append")
     private var leftBuffer: [Float] = []
     private var rightBuffer: [Float] = []
     private var countdownTimer: Timer?
@@ -110,21 +111,24 @@ final class CalibrationRecorder: ObservableObject {
             )
         }
 
+        // Pre-allocate to avoid heap allocation on the real-time thread.
+        let capacity = Int(targetDuration * format.sampleRate) + 4096
+        leftBuffer.reserveCapacity(capacity)
+        rightBuffer.reserveCapacity(capacity)
+
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buffer, _ in
-            self?.append(buffer: buffer)
+            // Copy buffer data on a non-RT queue to avoid allocation on
+            // the audio thread and races with finish() on the main thread.
+            guard let self, let channelData = buffer.floatChannelData else { return }
+            let frames = Int(buffer.frameLength)
+            let left = Array(UnsafeBufferPointer(start: channelData[0], count: frames))
+            let right = Array(UnsafeBufferPointer(start: channelData[1], count: frames))
+            self.appendQueue.async {
+                self.leftBuffer.append(contentsOf: left)
+                self.rightBuffer.append(contentsOf: right)
+            }
         }
-    }
-
-    private func append(buffer: AVAudioPCMBuffer) {
-        guard let channelData = buffer.floatChannelData else { return }
-        let frames = Int(buffer.frameLength)
-        let left = channelData[0]
-        let right = channelData[1]
-
-        // Copy into the growing buffers.
-        leftBuffer.append(contentsOf: UnsafeBufferPointer(start: left, count: frames))
-        rightBuffer.append(contentsOf: UnsafeBufferPointer(start: right, count: frames))
     }
 
     private func startCountdown() {
@@ -151,13 +155,18 @@ final class CalibrationRecorder: ObservableObject {
         let format = engine.inputNode.inputFormat(forBus: 0)
         let sampleRate = format.sampleRate > 0 ? format.sampleRate : 48_000
 
-        // Take a copy to freeze the clip.
-        let clip = CalibrationClip(
-            left: leftBuffer,
-            right: rightBuffer,
-            sampleRate: sampleRate
-        )
-        self.clip = clip
-        self.state = .finished
+        // Wait for any in-flight appends to drain before reading buffers.
+        appendQueue.async { [weak self] in
+            guard let self else { return }
+            let clip = CalibrationClip(
+                left: self.leftBuffer,
+                right: self.rightBuffer,
+                sampleRate: sampleRate
+            )
+            DispatchQueue.main.async {
+                self.clip = clip
+                self.state = .finished
+            }
+        }
     }
 }

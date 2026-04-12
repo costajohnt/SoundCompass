@@ -16,6 +16,9 @@ final class WatchConnectivityBridge: NSObject, ObservableObject {
 
     private let session: WCSession = .default
 
+    // Widget reload throttle — only reload when the direction label changes.
+    private var lastWidgetLabel: String?
+
     // Haptic feedback throttle. The watch plays a short tap whenever a
     // loud sound arrives from a direction that's meaningfully different
     // from the last tap so the user gets a wrist cue even if they're not
@@ -54,7 +57,14 @@ final class WatchConnectivityBridge: NSObject, ObservableObject {
             // its next timeline refresh. Both the watch app and the
             // SoundCompassWatchWidgets extension read this key.
             UserDefaults.standard.set(update.direction, forKey: "soundcompass.watch.lastDirection")
-            WidgetCenter.shared.reloadAllTimelines()
+
+            // Only reload widget timelines when the direction label
+            // actually changes to avoid excessive reload requests.
+            let newLabel = DirectionLabel.label(for: update.direction)
+            if newLabel != self.lastWidgetLabel {
+                self.lastWidgetLabel = newLabel
+                WidgetCenter.shared.reloadAllTimelines()
+            }
 
             self.maybePlayHaptic(update: update)
         }

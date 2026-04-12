@@ -12,6 +12,11 @@ import Foundation
 /// The implementation is allocation-free after `init(frameCount:)`: the
 /// input buffers are copied into zero-padded split-complex scratch vectors
 /// and everything after that runs in place.
+///
+/// **Thread safety:** This class is **not** thread-safe. Each instance
+/// owns mutable scratch buffers that are overwritten during
+/// `estimateLag`. Do not call `estimateLag` concurrently on the same
+/// instance. Each `DirectionEstimator` owns its own `GCCPHAT` instance.
 final class GCCPHAT {
 
     /// The zero-padded FFT size used internally. Always a power of two and

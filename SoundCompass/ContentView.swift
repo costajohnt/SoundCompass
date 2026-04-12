@@ -461,8 +461,12 @@ struct ContentView: View {
     private func prepareHaptics() {
         guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
         do {
-            hapticEngine = try CHHapticEngine()
-            try hapticEngine?.start()
+            let engine = try CHHapticEngine()
+            engine.resetHandler = { [weak engine] in
+                try? engine?.start()
+            }
+            try engine.start()
+            hapticEngine = engine
         } catch {
             hapticEngine = nil
         }
@@ -591,4 +595,5 @@ private struct BandRow: View {
 #Preview {
     ContentView()
         .environmentObject(AudioDirectionDetector())
+        .environmentObject(SettingsStore())
 }
