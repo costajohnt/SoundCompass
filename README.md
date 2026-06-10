@@ -79,24 +79,35 @@ them visually, haptically, and via the Watch on the wrist.
 
 ## How the DSP works
 
-Modern iPhones expose a stereo input that combines spatially separated
-microphones. When held flat with the screen facing up and pointing away from
-the user, the resulting left / right channels carry:
+iPhone "stereo" capture is **not** two raw microphones. The system records
+from all built-in mics simultaneously and synthesizes a beamformed stereo
+image (WWDC20 session 10226, "Record stereo audio with AVAudioSession").
+Two facts about that synthesized image drive the whole design:
 
-- an **interaural level difference (ILD)** — the side closer to the source
-  is slightly louder
-- an **interaural time difference (ITD)** — the closer side receives the
-  wavefront a few samples earlier
+- The **front and back data sources produce mirrored left/right** relative
+  to each other. `configureSession()` explicitly prefers the **back**
+  source, whose left/right match the user's when the phone is held flat,
+  screen up, top edge pointing away. If only the front source supports
+  stereo, the app uses it and flips the sign of every estimate.
+- The stereo image is primarily **level-encoded** (cardioid-like beams),
+  so the interaural level difference (ILD) is the trustworthy cue. The
+  inter-channel time difference (ITD) is a synthetic byproduct of Apple's
+  modeling and is only sometimes meaningful.
 
-`DirectionEstimator` computes both cues every buffer:
+`DirectionEstimator` fuses both cues with per-frame confidence weighting:
 
-1. RMS energy per channel (via `vDSP_rmsqv`) gives ILD.
+1. RMS energy per channel (via `vDSP_rmsqv`) gives the raw ILD, which is
+   expanded through `tanh(ildGain · ild)` to undo the compression of
+   Apple's shallow beams.
 2. `GCCPHAT.estimateLag` runs a radix-2 split-complex FFT on each channel,
    computes the cross-spectrum `R(f) · conj(L(f))`, normalises each bin to
    unit magnitude (the PHAT weight), IFFTs, and picks the lag with the
-   sharpest peak. That lag is normalised against `maxLagSamples` to yield
-   the ITD contribution.
-3. The two cues are weighted 40/60 (ILD/ITD), clamped to `[-1, 1]`, and
+   sharpest peak inside the physically possible window (~21 samples at
+   48 kHz for a 15 cm aperture).
+3. The normalized correlation peak height gates how much the lag is
+   trusted: a coherent wavefront earns the ITD up to a 45% share of the
+   blend, a diffuse or railed-at-the-window-edge peak earns it nothing,
+   and the ILD carries the rest. The result is clamped to `[-1, 1]` and
    exponentially smoothed in `AudioDirectionDetector` so the UI does not
    jitter.
 
@@ -250,6 +261,12 @@ nor microphone access; they exercise the DSP with synthetic signals.
   when it detects a mono input.
 - **Reverberant rooms.** GCC-PHAT helps, but extremely reflective spaces
   (tiled bathrooms, stairwells) still confuse the estimator.
+- **Synthesized stereo input.** iOS never exposes raw per-microphone
+  signals; the stereo pair is Apple's beamformed reconstruction, so the
+  achievable angular resolution is bounded by how much directional
+  information survives that processing. The debug overlay (Settings →
+  developer DSP stats) shows the live ILD / lag / confidence values so
+  this can be measured on a real device.
 - **Background operation.** The `audio` background mode is declared in
   `Info.plist`, but long-running background listening has not been audited.
 - **Watch-only.** The Watch companion is a pure mirror; it does not estimate

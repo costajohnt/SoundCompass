@@ -5,6 +5,30 @@ a commit on the development branch.
 
 ## Unreleased
 
+### Fixed
+
+- **Direction-finding audit** — root-caused the inaccurate direction
+  estimates and fixed the pipeline end to end:
+  - `configureSession()` now explicitly prefers the **back** stereo data
+    source. Front and back sources deliver mirrored left/right images
+    (WWDC20 10226); the old code took whichever stereo-capable source
+    enumerated first, which mirrors left/right on devices that list the
+    front source before the back one. Falling back to the front source
+    now flips the sign of every direction estimate to compensate.
+  - `DirectionEstimator` fuses cues by per-frame confidence instead of a
+    fixed 40/60 ILD/ITD blend. The GCC-PHAT lag only earns weight when
+    its normalized correlation peak is sharp and inside the physical
+    window; lags railed at the search-window edge are rejected. ILD is
+    expanded with `tanh(ildGain · ild)` instead of a hard clamp.
+  - `maxLagSamples` now defaults to the physical aperture limit
+    (≈21 samples at 48 kHz) instead of 48, so reverb tails can no longer
+    win the correlation peak at impossible lags.
+  - `setPreferredInputNumberOfChannels(2)` is requested explicitly.
+  - Debug overlay (gated by the developer DSP-stats setting) shows the
+    active data source, raw ILD/ITD, lag, and ITD confidence live.
+  - New regression tests: uncorrelated noise stays centered; railed lag
+    is ignored.
+
 ### Added
 
 - **Hardening pass**

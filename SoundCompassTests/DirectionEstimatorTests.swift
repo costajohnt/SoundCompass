@@ -125,7 +125,69 @@ final class DirectionEstimatorTests: XCTestCase {
         }
 
         XCTAssertTrue(estimate.isConfident)
-        XCTAssertGreaterThan(estimate.direction, 0.05,
+        // τ=4 over a ±32 window with full ITD confidence and a 0.45 ITD
+        // share works out to ≈ +0.056; assert the sign with margin.
+        XCTAssertGreaterThan(estimate.direction, 0.03,
                              "Expected positive (right) direction, got \(estimate.direction)")
+    }
+
+    func testUncorrelatedNoiseStaysCentered() {
+        // Independent noise in each channel at equal level: the GCC-PHAT
+        // peak is meaningless, so the confidence gate must keep the random
+        // lag from steering the arrow. Before confidence weighting, the
+        // spurious lag carried a fixed share of the blend and produced a
+        // large random deflection here.
+        let frameCount = 2048
+        let estimator = DirectionEstimator(sampleRate: 48_000, frameCount: frameCount)
+        let left = TestSignals.whiteNoise(count: frameCount, seed: 21)
+        let right = TestSignals.whiteNoise(count: frameCount, seed: 22)
+
+        let estimate = left.withUnsafeBufferPointer { l in
+            right.withUnsafeBufferPointer { r in
+                estimator.estimate(
+                    left: l.baseAddress!,
+                    right: r.baseAddress!,
+                    frameCount: frameCount
+                )
+            }
+        }
+
+        XCTAssertTrue(estimate.isConfident)
+        XCTAssertLessThan(estimate.itdConfidence, 0.3,
+                          "Uncorrelated channels should produce a weak correlation peak")
+        XCTAssertEqual(estimate.direction, 0, accuracy: 0.12,
+                       "Equal-level uncorrelated noise should stay near center, got \(estimate.direction)")
+    }
+
+    func testLagRailedAtWindowEdgeIsIgnored() {
+        // A delay equal to the full search window is the signature of a
+        // spurious correlation match; the estimator must zero its ITD
+        // confidence rather than report a hard-left/right direction.
+        let frameCount = 2048
+        let maxLag = 8
+        let estimator = DirectionEstimator(
+            sampleRate: 48_000,
+            maxLagSamples: maxLag,
+            frameCount: frameCount
+        )
+        let source = TestSignals.whiteNoise(count: frameCount + 32, seed: 23)
+        let (left, right) = TestSignals.delayedPair(
+            source: source,
+            tau: maxLag,
+            frameCount: frameCount
+        )
+
+        let estimate = left.withUnsafeBufferPointer { l in
+            right.withUnsafeBufferPointer { r in
+                estimator.estimate(
+                    left: l.baseAddress!,
+                    right: r.baseAddress!,
+                    frameCount: frameCount
+                )
+            }
+        }
+
+        XCTAssertEqual(estimate.itdConfidence, 0,
+                       "Lag railed at ±maxLag must be rejected, got confidence \(estimate.itdConfidence)")
     }
 }

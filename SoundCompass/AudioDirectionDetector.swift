@@ -30,6 +30,9 @@ final class AudioDirectionDetector: ObservableObject {
     @Published private(set) var bandResults: [SubbandDirectionEstimator.BandResult] = []
     @Published private(set) var dominantBandName: String?
 
+    /// Raw DSP debug values — visible when DSP stats toggle is on.
+    @Published private(set) var debugDSP: String = ""
+
     /// Top-scoring classifier label re-published from `SoundClassifier` so
     /// SwiftUI views that only observe this object still redraw when it
     /// changes. (SwiftUI does not propagate nested ObservableObjects.)
@@ -74,6 +77,15 @@ final class AudioDirectionDetector: ObservableObject {
     private var estimator: DirectionEstimator?
     private var subband: SubbandDirectionEstimator?
     private let bufferFrames: AVAudioFrameCount = 2048
+
+    /// `-1` when the active stereo data source delivers a mirrored image
+    /// (front source), `+1` otherwise. Written in `configureSession()`
+    /// before the tap is installed; read on the tap thread.
+    private var directionSign: Double = 1.0
+
+    /// Human-readable description of the stereo source in use, for the
+    /// debug overlay ("Back", "Front (mirrored)", "no stereo source").
+    private var activeSourceDescription: String = "?"
 
     // Lifecycle bookkeeping.
     private var isStarting = false
@@ -347,26 +359,45 @@ final class AudioDirectionDetector: ObservableObject {
             Log.audio.info("Built-in mic: \(builtIn.portName, privacy: .public)")
             Log.audio.info("Data sources: \(builtIn.dataSources?.count ?? 0)")
 
-            // Log every data source and its polar patterns so we can see
-            // what this device actually supports.
-            var foundStereo = false
             for source in builtIn.dataSources ?? [] {
                 let patterns = source.supportedPolarPatterns?.map(\.rawValue) ?? []
-                Log.audio.info("  Source: \(source.dataSourceName, privacy: .public) patterns: \(patterns, privacy: .public)")
-                if !foundStereo, source.supportedPolarPatterns?.contains(.stereo) == true {
-                    try source.setPreferredPolarPattern(.stereo)
-                    try builtIn.setPreferredDataSource(source)
-                    Log.audio.info("  → Selected for stereo")
-                    foundStereo = true
-                }
+                Log.audio.info("  Source: \(source.dataSourceName, privacy: .public) orientation: \(source.orientation?.rawValue ?? "nil", privacy: .public) patterns: \(patterns, privacy: .public)")
             }
 
-            if !foundStereo {
+            // iPhone "stereo" is a synthesized image and the FRONT and BACK
+            // data sources produce MIRRORED left/right relative to each
+            // other (WWDC20 session 10226). With the documented hold —
+            // phone flat, screen up, top edge pointing away — the BACK
+            // source's left/right match the user's left/right, so prefer
+            // it explicitly instead of taking whichever source happens to
+            // enumerate first. If only the front source supports stereo,
+            // use it and flip the sign of every direction estimate.
+            let stereoSources = (builtIn.dataSources ?? []).filter {
+                $0.supportedPolarPatterns?.contains(.stereo) == true
+            }
+            let chosen = stereoSources.first(where: { $0.orientation == .back })
+                ?? stereoSources.first
+
+            if let chosen {
+                try chosen.setPreferredPolarPattern(.stereo)
+                try builtIn.setPreferredDataSource(chosen)
+                let mirrored = chosen.orientation == .front
+                directionSign = mirrored ? -1.0 : 1.0
+                activeSourceDescription = "\(chosen.dataSourceName)\(mirrored ? " (mirrored)" : "")"
+                Log.audio.info("  → Selected \(chosen.dataSourceName, privacy: .public) for stereo, directionSign \(self.directionSign)")
+            } else {
+                directionSign = 1.0
+                activeSourceDescription = "no stereo source"
                 Log.audio.warning("No data source with stereo polar pattern found")
             }
         } else {
             Log.audio.warning("No built-in mic found in available inputs")
         }
+
+        // Ask for both channels explicitly — the polar pattern alone is a
+        // preference, not a guarantee. Best-effort: throws if the route
+        // can't do 2 channels, which the mono path already handles.
+        try? session.setPreferredInputNumberOfChannels(2)
 
         try session.setPreferredInputOrientation(.portrait)
         try session.setActive(true, options: [])
@@ -433,8 +464,18 @@ final class AudioDirectionDetector: ObservableObject {
         let left = channelData[0]
         let right = channelData[1]
 
-        let broadband = estimator.estimate(left: left, right: right, frameCount: frames)
-        let bands = subband.estimate(left: left, right: right, frameCount: frames)
+        // The estimators see raw channels; un-mirror front-source capture
+        // here so every consumer downstream gets user-space left/right.
+        let sign = directionSign
+        var broadband = estimator.estimate(left: left, right: right, frameCount: frames)
+        broadband.direction *= sign
+        let bands = subband.estimate(left: left, right: right, frameCount: frames).map {
+            SubbandDirectionEstimator.BandResult(
+                band: $0.band,
+                direction: $0.direction * sign,
+                magnitude: $0.magnitude
+            )
+        }
 
         // Pick the loudest band as the current focus.
         let dominant = bands.max(by: { $0.magnitude < $1.magnitude })
@@ -461,6 +502,12 @@ final class AudioDirectionDetector: ObservableObject {
             self.magnitude = self.magnitude * (1 - magBlend) + broadband.magnitude * magBlend
             self.bandResults = bands
             self.dominantBandName = dominant?.band.name
+            self.debugDSP = self.settings.showDebugStats
+                ? String(format: "src=%@ ILD=%.4f ITD=%.4f lag=%d conf=%.2f L=%.4f R=%.4f dir=%.3f",
+                    self.activeSourceDescription,
+                    broadband.rawILD, broadband.rawITD, broadband.lagSamples, broadband.itdConfidence,
+                    broadband.leftRms, broadband.rightRms, broadband.direction)
+                : ""
 
             if hazard {
                 let friendly = rawId.map(HazardClassifier.friendlyLabel) ?? "Hazard"

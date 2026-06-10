@@ -20,26 +20,40 @@ as a visual compass, a haptic tick, and optional spoken callouts.
 
 ## Capture
 
-A modern iPhone exposes a stereo input that combines its spatially separated
-microphones. ``AudioDirectionDetector`` configures an `AVAudioSession` with
-`.playAndRecord`, picks the built-in mic explicitly (so a paired Bluetooth
-headset doesn't mask it), and, where supported, switches the mic's data
-source to a `.stereo` polar pattern. The subsequent `AVAudioEngine` tap
-delivers 2-channel float buffers of roughly 2048 frames each.
+iPhone stereo capture is a **synthesized image**, not two raw microphones:
+the system records from all built-in mics simultaneously and beamforms a
+binaural-style stereo pair (WWDC20 session 10226). ``AudioDirectionDetector``
+configures an `AVAudioSession` with `.playAndRecord`, picks the built-in
+mic explicitly (so a paired Bluetooth headset doesn't mask it), and
+switches a data source to the `.stereo` polar pattern.
+
+Crucially, the **front and back data sources deliver mirrored left/right**
+relative to each other. The detector prefers the **back** source — its
+left/right match the user's when the phone is held flat, screen up, top
+edge pointing away — and if it has to fall back to the front source it
+flips the sign of every direction estimate. The subsequent `AVAudioEngine`
+tap delivers 2-channel float buffers of roughly 2048 frames each.
 
 ## Broadband direction estimation
 
 ``DirectionEstimator`` is called once per buffer and fuses two cues:
 
 1. **ILD** via `vDSP_rmsqv`, per channel. The normalized difference
-   `(R − L) / (R + L)` lives in `[-1, 1]`.
+   `(R − L) / (R + L)` lives in `[-1, 1]` but is compressed by the shallow
+   beam patterns of Apple's synthesized stereo, so it is expanded through
+   `tanh(ildGain · ild)` before fusion.
 2. **ITD** via ``GCCPHAT``, which computes the cross-spectrum
    `R · conj(L)`, whitens every bin with the PHAT weight
    `X[k] /= |X[k]|`, inverse-FFTs the result, and picks the lag that
-   maximises the correlation peak.
+   maximises the correlation peak inside the physically possible window
+   (≈21 samples at 48 kHz for a 15 cm aperture).
 
-The two cues are blended `0.4·ILD + 0.6·ITD`, clamped to `[-1, 1]`, and
-smoothed with an exponential filter whose α is driven by
+Because the stereo image is level-encoded by construction, the ILD always
+carries a 55% share of the blend. The ITD earns up to the remaining 45%
+per frame, scaled by the normalized height of its correlation peak: a
+coherent broadband wavefront gets full weight, a diffuse field or a peak
+railed at the search-window edge gets none. The fused value is clamped to
+`[-1, 1]` and smoothed with an exponential filter whose α is driven by
 ``SettingsStore/Sensitivity``.
 
 ### Why PHAT?

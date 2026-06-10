@@ -264,6 +264,11 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.6))
                 .monospacedDigit()
+            if !detector.debugDSP.isEmpty {
+                Text(detector.debugDSP)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.cyan.opacity(0.7))
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Current direction")
