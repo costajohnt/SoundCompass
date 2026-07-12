@@ -212,6 +212,12 @@ final class AudioDirectionDetector: ObservableObject {
                     try self.configureSession()
                     try self.installTap()
                     try self.engine.start()
+                    DSPDiagnostics.shared.begin(config:
+                        "source=\(self.activeSourceDescription) sign=\(self.directionSign) " +
+                        "sessionChannels=\(self.session.inputNumberOfChannels) " +
+                        "sampleRate=\(self.session.sampleRate) " +
+                        "engineFormat=\(self.engine.inputNode.inputFormat(forBus: 0).channelCount)ch"
+                    )
                     self.isRunning = true
                     self.lastError = nil
                     self.sessionStats.begin()
@@ -243,6 +249,7 @@ final class AudioDirectionDetector: ObservableObject {
         liveActivity.stop()
         sessionStats.end()
         subband?.reset()
+        DSPDiagnostics.shared.end()
         isRunning = false
     }
 
@@ -448,6 +455,7 @@ final class AudioDirectionDetector: ObservableObject {
 
         // Mono path — no direction possible, just publish loudness.
         if channels < 2 {
+            DSPDiagnostics.shared.note("MONO buffer (\(channels)ch) — direction impossible this frame")
             var rms: Float = 0
             vDSP_rmsqv(channelData[0], 1, &rms, vDSP_Length(frames))
             let loudness = Double(min(rms * 8, 1.0))
@@ -500,6 +508,11 @@ final class AudioDirectionDetector: ObservableObject {
                 self.direction *= 0.9
             }
             self.magnitude = self.magnitude * (1 - magBlend) + broadband.magnitude * magBlend
+            DSPDiagnostics.shared.append(
+                estimate: broadband,
+                smoothDir: self.direction,
+                magnitude: self.magnitude
+            )
             self.bandResults = bands
             self.dominantBandName = dominant?.band.name
             self.debugDSP = self.settings.showDebugStats

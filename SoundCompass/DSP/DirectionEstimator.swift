@@ -59,7 +59,14 @@ final class DirectionEstimator {
     /// squash. Apple's synthesized stereo uses shallow cardioid-like beams,
     /// so the raw `(R−L)/(R+L)` ratio is compressed well below the ±1 an
     /// ideal opposing-cardioid pair would produce; this expands it back.
+    /// Device measurement (iPhone 16 Pro, 2026-06-10): a hard-side source
+    /// at ~1 m produces |ild| ≈ 0.08, so gain 12 maps it to ~75% deflection.
     let ildGain: Double
+
+    /// |ild| below this is treated as zero. Ambient room noise produces
+    /// |ild| ≈ 0.01–0.02 even with no directional source; without a
+    /// dead-zone the high `ildGain` would turn that into visible wobble.
+    private let ildDeadZone = 0.01
 
     /// Normalized GCC-PHAT peak height below which the lag is treated as
     /// pure noise. A diffuse/uncorrelated input peaks around
@@ -75,7 +82,7 @@ final class DirectionEstimator {
         maxLagSamples: Int? = nil,
         noiseFloor: Float = 0.003,
         frameCount: Int = 2048,
-        ildGain: Double = 4.0
+        ildGain: Double = 12.0
     ) {
         self.sampleRate = sampleRate
         // Physical travel time across the device aperture, with headroom.
@@ -115,7 +122,8 @@ final class DirectionEstimator {
         // but compressed by how shallow Apple's beams are. tanh expands it
         // without the hard rail of a clamp.
         let ildRaw = Double((rightRms - leftRms) / combined)
-        let ildDirection = tanh(ildGain * ildRaw)
+        let ildMagnitude = max(0, abs(ildRaw) - ildDeadZone)
+        let ildDirection = tanh(ildGain * ildMagnitude) * (ildRaw < 0 ? -1 : 1)
 
         // Interaural time difference via GCC-PHAT. Positive lag means the
         // left channel led in time → sound is on the left → direction < 0.
@@ -140,13 +148,16 @@ final class DirectionEstimator {
             itdConfidence = 0
         }
 
-        // Confidence-weighted fusion. ILD carries a fixed share because the
-        // synthesized stereo image is fundamentally level-encoded; ITD earns
-        // its share per frame via the correlation peak instead of getting a
-        // fixed cut whether or not the lag meant anything.
-        let ildWeight = 0.55
-        let itdWeight = 0.45 * itdConfidence
-        let raw = (ildDirection * ildWeight + itd * itdWeight) / (ildWeight + itdWeight)
+        // Fusion. ILD is THE direction signal on Apple's synthesized
+        // stereo; device traces (iPhone 16 Pro, 2026-06-10) show the
+        // GCC-PHAT lag pinned at 0 with a sharp peak for sources at any
+        // azimuth, because the beamformer time-aligns the channels by
+        // construction. A weighted *average* would let that confident
+        // zero drag every estimate toward center, so the ITD enters as a
+        // small additive correction instead: it can nudge the result when
+        // a genuine inter-channel delay survives, and contributes nothing
+        // when the lag is zero.
+        let raw = ildDirection + 0.35 * itdConfidence * itd
         let clamped = max(-1.0, min(1.0, raw))
 
         return DirectionEstimate(

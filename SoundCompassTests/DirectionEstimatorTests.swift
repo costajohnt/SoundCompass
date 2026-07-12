@@ -125,8 +125,8 @@ final class DirectionEstimatorTests: XCTestCase {
         }
 
         XCTAssertTrue(estimate.isConfident)
-        // τ=4 over a ±32 window with full ITD confidence and a 0.45 ITD
-        // share works out to ≈ +0.056; assert the sign with margin.
+        // Pure delay carries no level difference, so only the additive ITD
+        // term contributes: 0.35 · (4/32) ≈ +0.044. Assert sign with margin.
         XCTAssertGreaterThan(estimate.direction, 0.03,
                              "Expected positive (right) direction, got \(estimate.direction)")
     }
