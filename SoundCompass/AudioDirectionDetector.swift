@@ -87,6 +87,11 @@ final class AudioDirectionDetector: ObservableObject {
     /// debug overlay ("Back", "Front (mirrored)", "no stereo source").
     private var activeSourceDescription: String = "?"
 
+    /// Set once the mono-input diagnostic marker has been written for the
+    /// current tap; reset on every `installTap()`. Keeps the real-time tap
+    /// thread from allocating a note string per mono frame.
+    private var loggedMonoDiagnostic = false
+
     // Lifecycle bookkeeping.
     private var isStarting = false
     private var wasRunningBeforeInterruption = false
@@ -212,11 +217,13 @@ final class AudioDirectionDetector: ObservableObject {
                     try self.configureSession()
                     try self.installTap()
                     try self.engine.start()
-                    DSPDiagnostics.shared.begin(config:
-                        "source=\(self.activeSourceDescription) sign=\(self.directionSign) " +
-                        "sessionChannels=\(self.session.inputNumberOfChannels) " +
-                        "sampleRate=\(self.session.sampleRate) " +
-                        "engineFormat=\(self.engine.inputNode.inputFormat(forBus: 0).channelCount)ch"
+                    DSPDiagnostics.shared.begin(
+                        config:
+                            "source=\(self.activeSourceDescription) sign=\(self.directionSign) " +
+                            "sessionChannels=\(self.session.inputNumberOfChannels) " +
+                            "sampleRate=\(self.session.sampleRate) " +
+                            "engineFormat=\(self.engine.inputNode.inputFormat(forBus: 0).channelCount)ch",
+                        enabled: self.settings.showDebugStats
                     )
                     self.isRunning = true
                     self.lastError = nil
@@ -240,6 +247,14 @@ final class AudioDirectionDetector: ObservableObject {
     func stop() {
         guard isRunning else { return }
         Log.lifecycle.info("AudioDirectionDetector stopping")
+        teardown()
+    }
+
+    /// Shared teardown for every path that ends a capture session: user
+    /// stop, interruption `.began`, and a failed route-change restart.
+    /// Divergent partial copies of this list previously left the Live
+    /// Activity, session stats, and diagnostics running after interruptions.
+    private func teardown() {
         passthroughMixer.pause()
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
@@ -271,11 +286,7 @@ final class AudioDirectionDetector: ObservableObject {
             Log.lifecycle.info("Audio interruption began")
             wasRunningBeforeInterruption = isRunning
             if isRunning {
-                engine.inputNode.removeTap(onBus: 0)
-                engine.stop()
-                announcer.stop()
-                frontBackResolver.stop()
-                isRunning = false
+                teardown()
             }
 
         case .ended:
@@ -343,7 +354,7 @@ final class AudioDirectionDetector: ObservableObject {
                 passthroughMixer.handleRouteChange()
             } catch {
                 lastError = "Audio route changed and could not be restarted: \(error.localizedDescription)"
-                isRunning = false
+                teardown()
             }
         default:
             break
@@ -433,6 +444,7 @@ final class AudioDirectionDetector: ObservableObject {
         )
         self.estimator = estimator
         self.subband = subband
+        loggedMonoDiagnostic = false
 
         classifier.configure(with: format)
 
@@ -455,7 +467,12 @@ final class AudioDirectionDetector: ObservableObject {
 
         // Mono path — no direction possible, just publish loudness.
         if channels < 2 {
-            DSPDiagnostics.shared.note("MONO buffer (\(channels)ch) — direction impossible this frame")
+            // Edge-triggered: one marker per tap install, not one per frame —
+            // the tap thread must stay free of per-frame allocations.
+            if !loggedMonoDiagnostic {
+                loggedMonoDiagnostic = true
+                DSPDiagnostics.shared.note("MONO input (\(channels)ch) — direction impossible")
+            }
             var rms: Float = 0
             vDSP_rmsqv(channelData[0], 1, &rms, vDSP_Length(frames))
             let loudness = Double(min(rms * 8, 1.0))
@@ -508,11 +525,13 @@ final class AudioDirectionDetector: ObservableObject {
                 self.direction *= 0.9
             }
             self.magnitude = self.magnitude * (1 - magBlend) + broadband.magnitude * magBlend
-            DSPDiagnostics.shared.append(
-                estimate: broadband,
-                smoothDir: self.direction,
-                magnitude: self.magnitude
-            )
+            if self.settings.showDebugStats {
+                DSPDiagnostics.shared.append(
+                    estimate: broadband,
+                    smoothDir: self.direction,
+                    magnitude: self.magnitude
+                )
+            }
             self.bandResults = bands
             self.dominantBandName = dominant?.band.name
             self.debugDSP = self.settings.showDebugStats
