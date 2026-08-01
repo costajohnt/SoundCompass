@@ -36,7 +36,7 @@ jobs:
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
-            build | xcpretty || true
+            build | xcpretty
 
       - name: Run DSP unit tests
         run: |
