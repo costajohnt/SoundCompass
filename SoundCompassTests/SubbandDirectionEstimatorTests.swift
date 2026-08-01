@@ -105,4 +105,29 @@ final class SubbandDirectionEstimatorTests: XCTestCase {
             XCTAssertEqual(result.band, bands[i])
         }
     }
+
+    func testLowSampleRateDropsBandsAboveNyquist() {
+        // Bluetooth HFP mics deliver 16 kHz; the default Alert (3–8 kHz)
+        // and High (8–16 kHz) bands violate Nyquist there and must be
+        // dropped at init rather than trapping in BiquadBandpass.
+        let sampleRate = 16_000.0
+        let frameCount = 1024
+        let subband = SubbandDirectionEstimator(
+            sampleRate: sampleRate,
+            frameCount: frameCount,
+            bands: SubbandDirectionEstimator.defaultBands()
+        )
+
+        XCTAssertEqual(subband.bands.map(\.name), ["Low", "Speech"])
+
+        let noise = TestSignals.whiteNoise(count: frameCount, seed: 7)
+        let results = noise.withUnsafeBufferPointer { buf in
+            subband.estimate(
+                left: buf.baseAddress!,
+                right: buf.baseAddress!,
+                frameCount: frameCount
+            )
+        }
+        XCTAssertEqual(results.map(\.band.name), ["Low", "Speech"])
+    }
 }

@@ -35,15 +35,20 @@ final class SubbandDirectionEstimator {
     init(sampleRate: Double, frameCount: Int, bands: [Band]) {
         self.sampleRate = sampleRate
         self.frameCount = frameCount
-        self.bands = bands
+        // Drop bands whose top edge sits too close to Nyquist for the
+        // biquad (`BiquadBandpass` preconditions `sampleRate > 2 * highHz`).
+        // Low-rate input routes are reachable in practice — a Bluetooth HFP
+        // mic runs at 16/24 kHz — and must degrade to fewer bands, not trap.
+        let usable = bands.filter { $0.highHz < 0.45 * sampleRate }
+        self.bands = usable
 
-        self.estimators = bands.map { _ in
+        self.estimators = usable.map { _ in
             DirectionEstimator(sampleRate: sampleRate, frameCount: frameCount)
         }
-        self.leftFilters = bands.map {
+        self.leftFilters = usable.map {
             BiquadBandpass(sampleRate: sampleRate, lowHz: $0.lowHz, highHz: $0.highHz)
         }
-        self.rightFilters = bands.map {
+        self.rightFilters = usable.map {
             BiquadBandpass(sampleRate: sampleRate, lowHz: $0.lowHz, highHz: $0.highHz)
         }
         self.leftScratch = [Float](repeating: 0, count: frameCount)
