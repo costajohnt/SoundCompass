@@ -108,8 +108,17 @@ final class FrontBackResolverTests: XCTestCase {
         waitForMain()
         XCTAssertEqual(resolver.resolution, .front)
 
-        clock = clock.addingTimeInterval(11)
+        // Let the window go completely still first (while the latch is
+        // fresh), then jump the clock past the latch and add a few more
+        // still samples: nothing in the window can re-derive the answer.
         for _ in 0..<80 {
+            resolver._injectForTesting(yaw: yawSweep, direction: sin(0.1 + yawSweep))
+        }
+        waitForMain()
+        XCTAssertEqual(resolver.resolution, .front)
+
+        clock = clock.addingTimeInterval(11)
+        for _ in 0..<5 {
             resolver._injectForTesting(yaw: yawSweep, direction: sin(0.1 + yawSweep))
         }
         waitForMain()

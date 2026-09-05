@@ -21,6 +21,11 @@ import Foundation
 enum HazardClassifier {
 
     /// Exact `version1` identifiers that should trigger the hazard path.
+    /// Every entry here is confirmed against `knownClassifications` by
+    /// `HazardClassifierTests` (CI run 33980885237 showed the model has
+    /// no `fire_alarm`, `car_alarm`, `doorbell`, `explosion` or
+    /// `reversing_beeps` classes, so those live only in the keyword rules
+    /// in case a future model version adds them).
     static let hazardIdentifiers: Set<String> = [
         "siren",
         "civil_defense_siren",
@@ -33,13 +38,8 @@ enum HazardClassifier {
         "train_horn",
         "alarm_clock",
         "smoke_detector",
-        "fire_alarm",
-        "car_alarm",
-        "doorbell",
         "glass_breaking",
         "gunshot_gunfire",
-        "explosion",
-        "reversing_beeps",
     ]
 
     /// Substrings that mark an identifier as a hazard.
