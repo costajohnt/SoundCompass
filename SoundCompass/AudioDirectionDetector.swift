@@ -317,6 +317,7 @@ final class AudioDirectionDetector: ObservableObject {
         subband?.reset()
         estimator?.reset()
         DSPDiagnostics.shared.end()
+        muteUntil.withLock { $0 = .distantPast }
         isRunning = false
         isHazardActive = false
         hazardLabel = nil
@@ -353,14 +354,16 @@ final class AudioDirectionDetector: ObservableObject {
         }
     }
 
+    /// Upper bound on a speech mute, so a missed `didFinish` (interrupted
+    /// synthesizer, audio session reset) cannot silence the mic for good.
+    /// Callouts are a few words; 8 s is far beyond any of them.
+    private static let maxSpeechMute: TimeInterval = 8
+
     private func setSpeechMute(_ speaking: Bool) {
-        if speaking {
-            muteUntil.withLock { $0 = .distantFuture }
-        } else {
-            // Short tail for the room's reverberation of the callout.
-            let until = Date().addingTimeInterval(0.3)
-            muteUntil.withLock { $0 = until }
-        }
+        let until = Date().addingTimeInterval(
+            speaking ? AudioDirectionDetector.maxSpeechMute : 0.3  // 0.3 s tail for the room's reverberation
+        )
+        muteUntil.withLock { $0 = until }
     }
 
     // MARK: - Interruptions
