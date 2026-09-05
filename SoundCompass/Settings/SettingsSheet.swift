@@ -16,12 +16,12 @@ struct SettingsSheet: View {
                 Section {
                     Picker("Sensitivity", selection: $settings.sensitivity) {
                         ForEach(SettingsStore.Sensitivity.allCases) { option in
-                            Text(option.label).tag(option)
+                            Text(verbatim: option.label).tag(option)
                         }
                     }
                     .pickerStyle(.segmented)
 
-                    Text(settings.sensitivity.description)
+                    Text(verbatim: settings.sensitivity.description)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } header: {
@@ -33,14 +33,14 @@ struct SettingsSheet: View {
                 Section {
                     Picker("Hearing ear", selection: $settings.hearingEar) {
                         ForEach(SettingsStore.HearingEar.allCases) { option in
-                            Text(option.label).tag(option)
+                            Text(verbatim: option.label).tag(option)
                         }
                     }
                     .pickerStyle(.segmented)
                 } header: {
                     Text("Which ear hears?")
                 } footer: {
-                    Text("SoundCompass uses this to decide which wrist-side haptic to play on the Watch and which channel to favor when it streams audio to your headphones.")
+                    Text("When audio passthrough is on, SoundCompass sends the room audio to this ear. Leave it unspecified to hear it in both.")
                 }
 
                 Section {
@@ -48,7 +48,7 @@ struct SettingsSheet: View {
                 } header: {
                     Text("Audio passthrough")
                 } footer: {
-                    Text("With headphones plugged in, SoundCompass routes the phone's stereo microphone audio into the ear you hear with, so you get some sense of sounds from your deaf side. Only active when headphones, Bluetooth, AirPlay, or a USB-audio device is connected — never through the phone's speaker.")
+                    Text("With headphones connected, SoundCompass routes the phone's stereo microphone audio into the ear you hear with, so you get some sense of sounds from your deaf side. Works with wired, USB-C, AirPlay and Bluetooth headphones — never through the phone's speaker. Bluetooth adds a noticeable delay; wired headphones are best.")
                 }
 
                 Section {
@@ -56,13 +56,13 @@ struct SettingsSheet: View {
                 } header: {
                     Text("Safety")
                 } footer: {
-                    Text("When a siren, alarm, horn, or reversing beep is detected, the arrow jumps straight to the latest direction (no smoothing), the compass turns red, and — on watchOS — the wrist taps once firmly. Recommended on.")
+                    Text("When a siren, alarm, horn, or reversing beep is detected, the arrow jumps straight to the latest direction (no smoothing), a red banner appears, the phone plays a strong haptic pattern, and a paired Apple Watch taps once firmly. Recommended on.")
                 }
 
                 Section("Haptics") {
                     Picker("Haptic strength", selection: $settings.hapticStrength) {
                         ForEach(SettingsStore.HapticStrength.allCases) { option in
-                            Text(option.label).tag(option)
+                            Text(verbatim: option.label).tag(option)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -75,7 +75,7 @@ struct SettingsSheet: View {
                             HStack {
                                 Text("Speech rate")
                                 Spacer()
-                                Text(speechRateLabel)
+                                Text(verbatim: speechRateLabel)
                                     .foregroundStyle(.secondary)
                                     .font(.caption.monospacedDigit())
                             }
@@ -85,7 +85,7 @@ struct SettingsSheet: View {
                         Picker("Voice", selection: voiceBinding) {
                             Text("System default").tag(String?.none)
                             ForEach(availableVoices, id: \.identifier) { voice in
-                                Text(voice.name).tag(String?.some(voice.identifier))
+                                Text(verbatim: voice.name).tag(String?.some(voice.identifier))
                             }
                         }
                     }
@@ -94,15 +94,23 @@ struct SettingsSheet: View {
                 Section("Appearance") {
                     Picker("Theme", selection: $settings.theme) {
                         ForEach(SettingsStore.Theme.allCases) { option in
-                            Text(option.label).tag(option)
+                            Text(verbatim: option.label).tag(option)
                         }
                     }
                     .pickerStyle(.segmented)
                 }
 
-                Section("Developer") {
+                Section {
                     Toggle("Show DSP stats", isOn: $settings.showDebugStats)
+                    Toggle("Measure ILD in 1–8 kHz band", isOn: $settings.ildHighBand)
                     Button("Calibration trace…") { showCalibration = true }
+                    if settings.ildGain != nil {
+                        Button("Reset ILD calibration") { settings.ildGain = nil }
+                    }
+                } header: {
+                    Text("Developer")
+                } footer: {
+                    Text(ildFooter)
                 }
 
                 Section {
@@ -122,6 +130,7 @@ struct SettingsSheet: View {
             }
             .sheet(isPresented: $showCalibration) {
                 CalibrationView()
+                    .environmentObject(settings)
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
@@ -136,6 +145,12 @@ struct SettingsSheet: View {
 
     private var speechRateLabel: String {
         String(format: "%.1f×", settings.speechRate)
+    }
+
+    private var ildFooter: LocalizedStringKey {
+        let gain = settings.ildGain ?? DirectionEstimator.defaultIldGain
+        let source = settings.ildGain == nil ? String(localized: "default") : String(localized: "calibrated")
+        return "ILD gain \(gain, specifier: "%.1f") (\(source)). The band toggle restricts the level comparison to frequencies where the phone's beams actually diverge; it is experimental until measured on more devices. The DSP stats toggle also writes a per-frame CSV trace to the app's Documents folder."
     }
 
     /// Voices filtered to the user's preferred language so the picker

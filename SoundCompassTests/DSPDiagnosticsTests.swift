@@ -27,7 +27,9 @@ final class DSPDiagnosticsTests: XCTestCase {
             lagSamples: 0,
             leftRms: 0.04,
             rightRms: 0.06,
-            itdConfidence: 0.8
+            itdConfidence: 0.8,
+            ildLeftRms: 0.03,
+            ildRightRms: 0.07
         )
     }
 
@@ -49,7 +51,7 @@ final class DSPDiagnosticsTests: XCTestCase {
         let diagnostics = DSPDiagnostics(fileURL: fileURL)
 
         diagnostics.begin(config: "source=Back sign=1.0", enabled: true)
-        diagnostics.append(estimate: makeEstimate(), smoothDir: 0.4, magnitude: 0.3)
+        diagnostics.append(estimate: makeEstimate(), smoothDir: 0.4, magnitude: 0.3, bandILD: "Low:0.0100|Speech:0.0500")
         diagnostics.note("MONO input")
         diagnostics.end()
         diagnostics.flush()
@@ -57,8 +59,8 @@ final class DSPDiagnosticsTests: XCTestCase {
         let contents = try String(contentsOf: fileURL, encoding: .utf8)
         let lines = contents.split(separator: "\n")
         XCTAssertEqual(lines[0], "# source=Back sign=1.0")
-        XCTAssertEqual(lines[1], "t,leftRms,rightRms,ildRaw,lag,itdConf,rawDir,smoothDir,magnitude")
-        XCTAssertTrue(lines[2].hasSuffix(",0.0500,0,0.80,0.500,0.400,0.300"),
+        XCTAssertEqual(lines[1], "t,leftRms,rightRms,ildLeftRms,ildRightRms,ildRaw,lag,itdConf,rawDir,smoothDir,magnitude,bandILD")
+        XCTAssertTrue(lines[2].hasSuffix(",0.04000,0.06000,0.03000,0.07000,0.0500,0,0.80,0.500,0.400,0.300,Low:0.0100|Speech:0.0500"),
                       "Frame row should carry the estimate values, got: \(lines[2])")
         XCTAssertEqual(lines[3], "# MONO input")
     }

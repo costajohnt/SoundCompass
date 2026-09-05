@@ -6,13 +6,15 @@ import XCTest
 /// simulate the user rotating the phone while a single sound source sits
 /// either in front of or behind them.
 ///
-/// Physics recap: for a source at angle `θ` from the phone's forward axis,
-/// the measured lateral direction is `sin(θ)`. When the user yaws the
-/// phone by `Δφ`, the source moves in the device frame to `θ − Δφ`.
+/// Physics recap: for a source at angle `θ` from the phone's forward axis
+/// (positive = right), the measured lateral direction is `sin(θ)`.
+/// CoreMotion yaw is positive for a **counter-clockwise** turn seen from
+/// above (right-handed frame, z out of the screen). Turning the phone CCW
+/// by `Δφ` swings its top edge left, so a world-fixed source appears at
+/// `θ + Δφ` in the device frame.
 ///
-/// * Sound in front  (θ ≈ 0):  sin(−Δφ)  → direction decreases with yaw
-/// * Sound behind    (θ ≈ π):  sin(π − Δφ) = sin(Δφ)  → direction
-///                                                       increases with yaw
+/// * Sound in front  (θ ≈ 0):  sin(Δφ)       → direction increases with yaw
+/// * Sound behind    (θ ≈ π):  sin(π + Δφ)   → direction decreases with yaw
 ///
 /// The resolver fits a linear regression of `direction` on `yaw`; the
 /// sign of the slope distinguishes front from back.
@@ -30,13 +32,13 @@ final class FrontBackResolverTests: XCTestCase {
         // is nonzero. θ = +10°.
         let thetaStart = 10 * Double.pi / 180
 
-        sweep(resolver: resolver, from: 0, to: yawSweep, source: thetaStart, front: true)
+        sweep(resolver: resolver, from: 0, to: yawSweep, source: thetaStart)
 
         // Let the async publish callbacks land.
         waitForMain()
 
         if case .front = resolver.resolution {
-            XCTAssertLessThan(resolver.slope, -0.3, "front should give a clearly negative slope, got \(resolver.slope)")
+            XCTAssertGreaterThan(resolver.slope, 0.3, "front should give a clearly positive slope, got \(resolver.slope)")
         } else {
             XCTFail("Expected .front, got \(resolver.resolution)")
         }
@@ -47,22 +49,31 @@ final class FrontBackResolverTests: XCTestCase {
         // Source behind, slightly to the right. θ = π − 10°.
         let thetaStart = Double.pi - 10 * Double.pi / 180
 
-        sweep(resolver: resolver, from: 0, to: yawSweep, source: thetaStart, front: false)
+        sweep(resolver: resolver, from: 0, to: yawSweep, source: thetaStart)
 
         waitForMain()
 
         if case .back = resolver.resolution {
-            XCTAssertGreaterThan(resolver.slope, 0.3, "back should give a clearly positive slope, got \(resolver.slope)")
+            XCTAssertLessThan(resolver.slope, -0.3, "back should give a clearly negative slope, got \(resolver.slope)")
         } else {
             XCTFail("Expected .back, got \(resolver.resolution)")
         }
+    }
+
+    func testClockwiseTurnStillResolvesFront() {
+        // A clockwise turn is a *negative* yaw sweep; the answer must not
+        // depend on which way the user turns.
+        let resolver = FrontBackResolver()
+        sweep(resolver: resolver, from: 0, to: -yawSweep, source: 0.1)
+        waitForMain()
+        XCTAssertEqual(resolver.resolution, .front)
     }
 
     func testInsufficientRotationReturnsNeedsRotation() {
         let resolver = FrontBackResolver()
         // Only rotate 5° — below the 15° minimum.
         let smallSweep: Double = 5 * .pi / 180
-        sweep(resolver: resolver, from: 0, to: smallSweep, source: 0.3, front: true)
+        sweep(resolver: resolver, from: 0, to: smallSweep, source: 0.3)
 
         waitForMain()
 
@@ -74,9 +85,53 @@ final class FrontBackResolverTests: XCTestCase {
         }
     }
 
+    func testResolutionLatchesAfterUserStopsTurning() {
+        // After the sweep, hold the phone still long enough for the
+        // sample window to contain only one yaw value. Without the latch
+        // the resolver would fall back to `.needsRotation` immediately.
+        let resolver = FrontBackResolver()
+        sweep(resolver: resolver, from: 0, to: yawSweep, source: 0.1)
+        waitForMain()
+        XCTAssertEqual(resolver.resolution, .front)
+
+        for _ in 0..<80 {
+            resolver._injectForTesting(yaw: yawSweep, direction: sin(0.1 + yawSweep))
+        }
+        waitForMain()
+        XCTAssertEqual(resolver.resolution, .front, "latched result should survive a still window")
+    }
+
+    func testLatchExpires() {
+        var clock = Date(timeIntervalSince1970: 1_000)
+        let resolver = FrontBackResolver(latchDuration: 10, now: { clock })
+        sweep(resolver: resolver, from: 0, to: yawSweep, source: 0.1)
+        waitForMain()
+        XCTAssertEqual(resolver.resolution, .front)
+
+        // Let the window go completely still first (while the latch is
+        // fresh), then jump the clock past the latch and add a few more
+        // still samples: nothing in the window can re-derive the answer.
+        for _ in 0..<80 {
+            resolver._injectForTesting(yaw: yawSweep, direction: sin(0.1 + yawSweep))
+        }
+        waitForMain()
+        XCTAssertEqual(resolver.resolution, .front)
+
+        clock = clock.addingTimeInterval(11)
+        for _ in 0..<5 {
+            resolver._injectForTesting(yaw: yawSweep, direction: sin(0.1 + yawSweep))
+        }
+        waitForMain()
+        if case .needsRotation = resolver.resolution {
+            // expected
+        } else {
+            XCTFail("Expected latch to expire into .needsRotation, got \(resolver.resolution)")
+        }
+    }
+
     func testResetClearsState() {
         let resolver = FrontBackResolver()
-        sweep(resolver: resolver, from: 0, to: yawSweep, source: 0.2, front: true)
+        sweep(resolver: resolver, from: 0, to: yawSweep, source: 0.2)
         waitForMain()
 
         resolver._resetForTesting()
@@ -95,19 +150,17 @@ final class FrontBackResolverTests: XCTestCase {
         resolver: FrontBackResolver,
         from startYaw: Double,
         to endYaw: Double,
-        source theta: Double,
-        front: Bool
+        source theta: Double
     ) {
         let step = (endYaw - startYaw) / Double(sampleCount - 1)
         for i in 0..<sampleCount {
             let yaw = startYaw + step * Double(i)
             // Source angle relative to the device frame. For a world-fixed
-            // source at absolute angle `theta`, after the phone has rotated
-            // by `yaw`, the apparent angle is `theta − yaw`.
-            let relative = theta - yaw
+            // source at absolute angle `theta`, after the phone has turned
+            // CCW by `yaw`, the apparent angle is `theta + yaw`.
+            let relative = theta + yaw
             let direction = sin(relative)
             resolver._injectForTesting(yaw: yaw, direction: direction)
-            _ = front  // unused flag kept for future assertions
         }
     }
 

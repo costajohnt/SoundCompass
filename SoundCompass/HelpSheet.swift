@@ -14,11 +14,12 @@ struct HelpSheet: View {
                     HelpSection(
                         title: "How does SoundCompass know where a sound is?",
                         content: """
-                        Modern iPhones have more than one microphone, physically separated. \
-                        When a sound reaches the phone, the nearer mic hears it slightly louder \
-                        and a few samples earlier. SoundCompass compares the two channels with \
-                        a cross-correlation algorithm (GCC-PHAT) and uses the offset to estimate \
-                        the direction.
+                        Modern iPhones have several microphones, and iOS combines them into a \
+                        stereo picture of the room. When a sound comes from your left, the left \
+                        channel of that picture is a little louder than the right. SoundCompass \
+                        measures that level difference many times a second and turns it into \
+                        the arrow. Expect it to tell left from centre from right reliably; the \
+                        exact angle is an estimate.
                         """
                     )
 
@@ -93,8 +94,8 @@ struct HelpSheet: View {
 }
 
 private struct HelpSection: View {
-    let title: String
-    let content: String
+    let title: LocalizedStringKey
+    let content: LocalizedStringKey
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

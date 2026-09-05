@@ -86,16 +86,28 @@ final class PassthroughMixer {
         }
     }
 
+    /// I/O buffer duration requested while passthrough is live. The
+    /// default (~23 ms) plus a Bluetooth A2DP link (100–200 ms) is an
+    /// audible echo; 10 ms is the practical floor that still leaves the
+    /// tap enough headroom. Wired / USB-C headphones get the full benefit.
+    static let passthroughIOBufferDuration: TimeInterval = 0.010
+
     private func connect() {
         guard !isConnected else {
             engine.mainMixerNode.pan = desiredPan
             return
         }
         let format = engine.inputNode.inputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            Log.passthrough.warning("Refusing to connect passthrough: invalid input format")
+            return
+        }
+        try? session.setPreferredIOBufferDuration(PassthroughMixer.passthroughIOBufferDuration)
         engine.connect(engine.inputNode, to: engine.mainMixerNode, format: format)
         engine.mainMixerNode.pan = desiredPan
         engine.mainMixerNode.outputVolume = 1.0
         isConnected = true
+        Log.passthrough.info("Passthrough connected, pan \(self.desiredPan)")
     }
 
     private func disconnect() {
@@ -104,6 +116,7 @@ final class PassthroughMixer {
         // between inputNode and mainMixerNode does not remove the tap.
         engine.disconnectNodeOutput(engine.inputNode)
         isConnected = false
+        Log.passthrough.info("Passthrough disconnected")
     }
 
     private func hasSafeOutputRoute() -> Bool {

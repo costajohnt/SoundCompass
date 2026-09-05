@@ -3,13 +3,20 @@ import XCTest
 
 final class EventHistoryStoreTests: XCTestCase {
 
+    /// A manual clock so the coalescing window can be exercised without
+    /// sleeping.
+    private final class Clock {
+        var now = Date(timeIntervalSince1970: 1_000)
+        func advance(_ seconds: TimeInterval) { now = now.addingTimeInterval(seconds) }
+    }
+
     func testAppendPrependsMostRecent() {
-        let store = EventHistoryStore(maxEvents: 5)
+        let clock = Clock()
+        let store = EventHistoryStore(maxEvents: 5, now: { clock.now })
 
         store.record(label: "Speech", rawIdentifier: "speech",
                      direction: 0.1, magnitude: 0.5, isHazard: false)
-        // Sleep a touch so the coalesce hysteresis isn't triggered.
-        usleep(1_500_000)  // 1.5 s > minInterval (0.8 s)
+        clock.advance(1.5)
         store.record(label: "Car horn", rawIdentifier: "car_horn",
                      direction: -0.6, magnitude: 0.9, isHazard: true)
 
@@ -19,7 +26,8 @@ final class EventHistoryStoreTests: XCTestCase {
     }
 
     func testMaxEventsIsRespected() {
-        let store = EventHistoryStore(maxEvents: 3)
+        let clock = Clock()
+        let store = EventHistoryStore(maxEvents: 3, now: { clock.now })
         for i in 0..<5 {
             store.record(
                 label: "E\(i)",
@@ -28,7 +36,7 @@ final class EventHistoryStoreTests: XCTestCase {
                 magnitude: 0.5,
                 isHazard: false
             )
-            usleep(900_000)  // 0.9s > minInterval
+            clock.advance(0.9)
         }
         XCTAssertEqual(store.events.count, 3)
         // Latest should be at index 0.
@@ -37,13 +45,24 @@ final class EventHistoryStoreTests: XCTestCase {
     }
 
     func testCoalescesRepeats() {
-        let store = EventHistoryStore()
+        let clock = Clock()
+        let store = EventHistoryStore(now: { clock.now })
         store.record(label: "Speech", rawIdentifier: "speech",
                      direction: 0, magnitude: 0.5, isHazard: false)
-        // Immediately repeat — should be coalesced.
+        clock.advance(0.2)
         store.record(label: "Speech", rawIdentifier: "speech",
                      direction: 0.1, magnitude: 0.5, isHazard: false)
         XCTAssertEqual(store.events.count, 1)
+    }
+
+    func testDifferentIdentifierIsNotCoalesced() {
+        let clock = Clock()
+        let store = EventHistoryStore(now: { clock.now })
+        store.record(label: "Speech", rawIdentifier: "speech",
+                     direction: 0, magnitude: 0.5, isHazard: false)
+        store.record(label: "Siren", rawIdentifier: "siren",
+                     direction: 0.1, magnitude: 0.5, isHazard: true)
+        XCTAssertEqual(store.events.count, 2)
     }
 
     func testClearEmptiesStore() {

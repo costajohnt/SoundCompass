@@ -2,23 +2,24 @@
 
 A one-page map of how the iOS app, the watchOS companion, and the
 widget extensions fit together. For the DSP-specific details see
-`SoundCompass/Documentation.docc/DSPPipeline.md`.
+`SoundCompass/Documentation.docc/DSPPipeline.md`; for the review that
+shaped the current design see `AUDIT.md`.
 
 ## Targets
 
 ```
 SoundCompass.xcodeproj (generated from project.yml via XcodeGen)
-├── SoundCompass                  iOS 17+ app target
-├── SoundCompassWatch             watchOS 10+ app target
+├── SoundCompass                  iOS 18+ app target
+├── SoundCompassWatch             watchOS 11+ app target (not embedded by default)
 ├── SoundCompassWatchWidgets      watchOS WidgetKit extension (complication)
 ├── SoundCompassWidgets           iOS WidgetKit extension (Live Activity)
 └── SoundCompassTests             iOS unit-test bundle
 ```
 
-Everything in `Shared/` is compiled into all platform targets so the
-compass view, direction label helpers, the `DirectionUpdate` payload
-type, and the Live Activity `ActivityAttributes` are the exact same
-symbols on both sides of every IPC boundary.
+`Shared/` holds the code compiled into more than one target: the compass
+view, the localized direction labels, the `DirectionUpdate` payload, the
+Live Activity `ActivityAttributes`, and `SharedDefaults` (the App Group
+suite the watch app and its complication both read).
 
 ## iOS app layers
 
@@ -36,117 +37,115 @@ symbols on both sides of every IPC boundary.
            ┌──────────┘        │        └──────────┐
            ▼                   ▼                   ▼
    ┌──────────────┐   ┌──────────────┐   ┌──────────────────┐
-   │ AVAudioEngine│   │ CoreMotion   │   │ Shared ObservableObjects
-   │     tap      │   │ FrontBack    │   │ SoundClassifier
-   │              │   │ Resolver     │   │ SpeechAnnouncer
-   └──────┬───────┘   └──────────────┘   │ WatchSessionManager
-          │                              │ LiveActivityController
-          ▼                              │ PassthroughMixer
-   ┌──────────────┐                      │ HazardNotifier
-   │ DSP pipeline │                      │ EventHistoryStore
-   │ Direction /  │                      │ SessionStats
-   │ Subband /    │                      │ SettingsStore
+   │ AVAudioEngine│   │ CoreMotion   │   │ SoundClassifier
+   │     tap      │   │ FrontBack    │   │ SpeechAnnouncer
+   │              │   │ Resolver     │   │ WatchSessionManager
+   └──────┬───────┘   └──────────────┘   │ LiveActivityController
+          │                              │ PassthroughMixer
+          ▼                              │ HazardNotifier
+   ┌──────────────┐                      │ EventHistoryStore
+   │ DSP pipeline │                      │ SessionStats
+   │ Estimator /  │                      │ SettingsStore
+   │ Subband /    │                      │ DSPDiagnostics
    │ GCC-PHAT     │                      └──────────────────┘
+   └──────┬───────┘
+          ▼  (main queue)
+   ┌──────────────┐
+   │ DirectionSmoother + HazardGate │
    └──────────────┘
 ```
 
+### Capture
+
+`AudioSessionConfigurator` is the single owner of session setup:
+`.playAndRecord` with `.defaultToSpeaker` and `.allowBluetoothA2DP`
+(needed for any Bluetooth *output*; HFP is deliberately not allowed
+because it would switch the input to a mono headset mic), built-in mic
+preferred, **back** stereo data source preferred with the front source
+as a mirrored fallback. Both the live detector and the calibration
+recorder call it, so their left/right agree.
+
+Route changes only reinstall the tap when the *input* port set changed;
+output-only changes go to the passthrough mixer.
+
 ### DSP pipeline
 
-The pipeline in `SoundCompass/DSP/` is pure Swift, allocation-free
-after init, and unit-testable with synthetic signal helpers in
-`SoundCompassTests/TestSignals.swift`:
+1. `AVAudioEngine.installTap` delivers a stereo `AVAudioPCMBuffer`. The
+   detector walks it in 2048-frame chunks so every frame is analysed even
+   when the system delivers larger buffers.
+2. `DirectionEstimator` computes broadband loudness, an ILD from either
+   the broadband or a 1–8 kHz band-limited copy (`BiquadBandLimiter`),
+   and an optional GCC-PHAT lag with a confidence gate. Output:
+   `ild + 0.35 · confidence · itd`.
+3. `SubbandDirectionEstimator` runs ILD-only estimators inside four
+   streaming `BiquadBandpass` bands.
+4. On the main queue, `DirectionSmoother` blends the estimate with the
+   sensitivity preset's weight (0.9 during a hazard) and `HazardGate`
+   turns "the classifier currently says hazard" into an edge-triggered
+   banner state.
+5. `SoundClassifier` runs Apple's `SNClassifySoundRequest(.version1)` on
+   its own queue; `ClassifierLabelTracker` clears labels on a
+   low-confidence result or after 2.5 s without one.
+6. `FrontBackResolver` regresses direction on unwrapped yaw (front ⇒
+   positive slope, CoreMotion yaw being counter-clockwise positive) and
+   latches the answer for ten seconds.
 
-1. `AVAudioEngine.installTap` delivers a stereo `AVAudioPCMBuffer`
-   on the audio thread.
-2. `DirectionEstimator` fuses `vDSP_rmsqv`-based ILD with
-   `GCCPHAT`-based ITD into a normalized direction / magnitude.
-3. `SubbandDirectionEstimator` runs an independent estimator inside
-   each of four octave-ish bands via streaming `BiquadBandpass`
-   filters.
-4. `SoundClassifier` (Apple's built-in
-   `SNClassifySoundRequest(.version1)`) runs on its own
-   analysisQueue and publishes a top label.
-5. `FrontBackResolver` correlates direction changes with
-   `CMDeviceMotion.attitude.yaw` to distinguish front from back.
+### Self-excitation guard
 
-Results are pushed to the main queue and into `@Published` state.
+The detector ignores microphone input while `AVSpeechSynthesizer` is
+speaking (plus a 0.3 s tail) and for a few tens of milliseconds after
+each haptic, via a lock-protected "mute until" timestamp read on the tap
+thread.
 
 ### Fan-out
 
-On every DSP update, the detector fans out to:
-
-- `SpeechAnnouncer` — `AVSpeechSynthesizer`, rate-limited.
-- `WatchSessionManager` — `WCSession.sendMessage` or
-  `updateApplicationContext` depending on reachability.
-- `LiveActivityController` — Dynamic Island + Lock Screen.
-- `HazardNotifier` — backgrounded local notifications on hazards.
-- `EventHistoryStore` + `SessionStats` — in-memory event log.
-
-### CROS passthrough
-
-`PassthroughMixer` connects `engine.inputNode` to
-`engine.mainMixerNode` and pans the output hard toward the user's
-hearing ear, so headphones stream the full stereo capture into the
-working ear. Only engages when a safe output route (headphones,
-Bluetooth, AirPlay, USB audio, line-out) is connected — never over
-the internal speaker to avoid feedback.
-
-### Interruption + route changes
-
-The detector observes `AVAudioSession.interruptionNotification` and
-`routeChangeNotification`. Phone calls / Siri / alarms pause the tap
-and resume cleanly; headset plug/unplug tears down the tap and
-re-installs it with the new format.
+Per buffer, the detector fans out to `SpeechAnnouncer`,
+`WatchSessionManager` (rate-limited, hazard transitions bypass the
+limit), `LiveActivityController` (≤3 Hz), `HazardNotifier` (background
+only), and `EventHistoryStore` + `SessionStats`.
 
 ### Settings
 
-`SettingsStore` is an `ObservableObject` backed by a (dependency-
-injected) `UserDefaults`. The detector subscribes to the relevant
-publishers and propagates changes: sensitivity drives the
-exponential smoother weights, hazard alerts gate the hazard override,
-speech fields drive `SpeechAnnouncer`, and passthrough settings drive
-`PassthroughMixer`.
+`SettingsStore` is an `ObservableObject` over an injectable
+`UserDefaults`. Besides the user-facing options it stores the per-device
+`ildGain` written by the calibration screen and the developer
+`ildHighBand` switch. The detector subscribes to both: a gain change is
+applied to the live estimators immediately, a band change reinstalls the
+tap.
 
 ## Watch companion
 
-`SoundCompassWatch` is a thin SwiftUI mirror. `WatchConnectivityBridge`
-receives `DirectionUpdate` dictionaries and both:
+`WatchConnectivityBridge` receives `DirectionUpdate` dictionaries, updates
+`@Published` state, writes the last direction to `SharedDefaults.store`
+(the App Group suite), asks WidgetKit to reload at most every five
+minutes or on a hazard, and plays a wrist haptic — `.notification` when a
+hazard begins, a direction tick otherwise.
 
-1. Updates `@Published` state so `WatchContentView` redraws.
-2. Writes the latest direction to `UserDefaults` and calls
-   `WidgetCenter.reloadAllTimelines()` so the
-   `SoundCompassWatchWidgets` complication picks it up on its next
-   timeline refresh.
-3. Plays a `WKInterfaceDevice.directionUp/click/directionDown` haptic
-   when a loud enough sound arrives at a meaningfully different
-   direction.
+`WatchContentView` renders inside a 1 Hz `TimelineView` so the stale
+indicator appears without waiting for the next message.
 
 ## Widget extensions
 
-`SoundCompassWidgets` (iOS) renders the `SoundCompassLiveActivity`
-for the Lock Screen and Dynamic Island, consuming the
-`SoundCompassActivityAttributes` defined in `Shared/`.
-
-`SoundCompassWatchWidgets` (watchOS) ships a
-`SoundCompassComplication` available in circular, corner, inline,
-and rectangular accessory families.
+`SoundCompassWidgets` (iOS) renders the Live Activity from
+`SoundCompassActivityAttributes`. `SoundCompassWatchWidgets` (watchOS)
+reads `SharedDefaults.store` for the complication; without the App Group
+entitlement on both watch targets it would only ever see its placeholder.
 
 ## Tests
 
-`SoundCompassTests` is an `@testable import SoundCompass` XCTest
-bundle that exercises the DSP layer (`GCCPHAT`, `DirectionEstimator`,
-`SubbandDirectionEstimator`), the motion-fusion `FrontBackResolver`
-via a DEBUG-only injection hook, and the plain Swift state types
-(`SettingsStore`, `SessionStats`, `EventHistoryStore`,
-`HazardClassifier`, `DirectionLabel`, `DirectionUpdate`,
-`SoundCompassActivityAttributes`, `CalibrationProcessor`,
-`PassthroughMixer`). All tests run without a device — they use
-synthetic signals from `TestSignals.swift` and dependency-injected
-`UserDefaults` suites.
+`SoundCompassTests` (`@testable import SoundCompass`) covers the DSP
+(`GCCPHAT`, `DirectionEstimator` including device-scale ILD and the
+band-limited path, `SubbandDirectionEstimator`, `DirectionSmoother`,
+`CalibrationProcessor` including gain suggestion), the state machines
+(`HazardGate`, `ClassifierLabelTracker`, `FrontBackResolver` via a
+DEBUG-only injection hook, `EventHistoryStore` and `SessionStats` with
+injected clocks, `SpeechAnnouncer` with the synthesizer disabled), the
+session source-selection rule, and the hazard identifier list against
+Apple's real `knownClassifications`.
 
 ## CI
 
-`.github/workflows/soundcompass.yml` runs on `macos-14`, installs
-XcodeGen via Homebrew, regenerates the project, builds for the iOS
-Simulator, and runs the full test suite on every push and pull
-request.
+`.github/workflows/soundcompass.yml` runs two jobs on `macos-15`: the
+iOS unit tests via `xcodebuild test` on the `SoundCompass-iOS` scheme,
+and a compile of the `SoundCompass-watchOS` scheme for the watchOS
+Simulator so the companion cannot rot unnoticed.

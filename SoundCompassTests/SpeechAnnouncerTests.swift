@@ -47,4 +47,53 @@ final class SpeechAnnouncerTests: XCTestCase {
             "com.apple.voice.compact.en-US.Samantha"
         )
     }
+
+    // MARK: - Rate limiting and phrasing (synthesizer disabled)
+
+    private func silentAnnouncer(minInterval: TimeInterval = 2.0) -> (SpeechAnnouncer, () -> [String]) {
+        let announcer = SpeechAnnouncer(minInterval: minInterval)
+        announcer.speaksAloud = false
+        announcer.isEnabled = true
+        var spoken: [String] = []
+        announcer.onPhrase = { spoken.append($0) }
+        return (announcer, { spoken })
+    }
+
+    func testQuietSoundsAreNotAnnounced() {
+        let (announcer, spoken) = silentAnnouncer()
+        announcer.announce(direction: 0.8, magnitude: 0.1, label: "Car horn")
+        XCTAssertTrue(spoken().isEmpty)
+    }
+
+    func testPhraseUsesLabelAndDirection() {
+        let (announcer, spoken) = silentAnnouncer()
+        announcer.announce(direction: 0.8, magnitude: 0.9, label: "Car horn")
+        XCTAssertEqual(spoken(), ["car horn far right"])
+    }
+
+    func testPhraseWithoutLabel() {
+        let (announcer, spoken) = silentAnnouncer()
+        announcer.announce(direction: -0.4, magnitude: 0.9, label: nil)
+        XCTAssertEqual(spoken(), ["Sound from your left"])
+    }
+
+    func testSecondAnnouncementInsideMinIntervalIsDropped() {
+        let (announcer, spoken) = silentAnnouncer(minInterval: 2.0)
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        announcer.announce(direction: 0.8, magnitude: 0.9, label: "Car horn", now: t0)
+        announcer.announce(direction: -0.8, magnitude: 0.9, label: "Dog bark", now: t0.addingTimeInterval(1))
+        XCTAssertEqual(spoken().count, 1)
+        announcer.announce(direction: -0.8, magnitude: 0.9, label: "Dog bark", now: t0.addingTimeInterval(3))
+        XCTAssertEqual(spoken().count, 2)
+    }
+
+    func testUnchangedDirectionAndLabelIsNotRepeated() {
+        let (announcer, spoken) = silentAnnouncer(minInterval: 0)
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        announcer.announce(direction: 0.8, magnitude: 0.9, label: "Car horn", now: t0)
+        announcer.announce(direction: 0.85, magnitude: 0.9, label: "Car horn", now: t0.addingTimeInterval(1))
+        XCTAssertEqual(spoken().count, 1)
+        announcer.announce(direction: 0.2, magnitude: 0.9, label: "Car horn", now: t0.addingTimeInterval(2))
+        XCTAssertEqual(spoken().count, 2, "a ≥0.3 direction change should be announced")
+    }
 }

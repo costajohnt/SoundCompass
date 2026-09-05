@@ -13,7 +13,12 @@ import Foundation
 /// * Skipped when the loudness is below `loudnessThreshold`.
 /// * Skipped when neither the direction (> `directionHysteresis`) nor the
 ///   classifier label has changed.
-final class SpeechAnnouncer {
+///
+/// The announcer reports when it is speaking via `onSpeakingChanged` so
+/// `AudioDirectionDetector` can mute the microphone path: the phone's own
+/// speaker is 10 cm from the mics, and without the mute the classifier
+/// labels every callout "speech" and the arrow points at the speaker.
+final class SpeechAnnouncer: NSObject {
 
     var isEnabled: Bool = false
 
@@ -26,8 +31,19 @@ final class SpeechAnnouncer {
     /// preferred language.
     var voiceIdentifier: String?
 
+    /// Called on the main thread when synthesis starts (`true`) and when
+    /// it finishes or is cancelled (`false`).
+    var onSpeakingChanged: ((Bool) -> Void)?
+
+    /// Test hook: receives every phrase that passes the rate limiter.
+    /// When `speaksAloud` is `false` the synthesizer is not engaged.
+    var onPhrase: ((String) -> Void)?
+    var speaksAloud: Bool = true
+
+    private(set) var isSpeaking = false
+
     private let synthesizer = AVSpeechSynthesizer()
-    private let minInterval: TimeInterval = 2.0
+    private let minInterval: TimeInterval
     private let loudnessThreshold: Double = 0.3
     private let directionHysteresis: Double = 0.3
 
@@ -35,11 +51,15 @@ final class SpeechAnnouncer {
     private var lastDirection: Double = 0
     private var lastLabel: String?
 
-    func announce(direction: Double, magnitude: Double, label: String?) {
+    init(minInterval: TimeInterval = 2.0) {
+        self.minInterval = minInterval
+        super.init()
+        synthesizer.delegate = self
+    }
+
+    func announce(direction: Double, magnitude: Double, label: String?, now: Date = Date()) {
         guard isEnabled else { return }
         guard magnitude >= loudnessThreshold else { return }
-
-        let now = Date()
         guard now.timeIntervalSince(lastAnnouncement) > minInterval else { return }
 
         let directionChanged = abs(direction - lastDirection) >= directionHysteresis
@@ -47,15 +67,18 @@ final class SpeechAnnouncer {
         guard directionChanged || labelChanged else { return }
 
         let phrase = buildPhrase(direction: direction, label: label)
-        let utterance = AVSpeechUtterance(string: phrase)
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate * Float(rateMultiplier)
-        utterance.volume = 0.9
-        utterance.pitchMultiplier = 1.0
-        if let voiceIdentifier,
-           let voice = AVSpeechSynthesisVoice(identifier: voiceIdentifier) {
-            utterance.voice = voice
+        onPhrase?(phrase)
+        if speaksAloud {
+            let utterance = AVSpeechUtterance(string: phrase)
+            utterance.rate = AVSpeechUtteranceDefaultSpeechRate * Float(rateMultiplier)
+            utterance.volume = 0.9
+            utterance.pitchMultiplier = 1.0
+            if let voiceIdentifier,
+               let voice = AVSpeechSynthesisVoice(identifier: voiceIdentifier) {
+                utterance.voice = voice
+            }
+            synthesizer.speak(utterance)
         }
-        synthesizer.speak(utterance)
 
         lastAnnouncement = now
         lastDirection = direction
@@ -69,9 +92,29 @@ final class SpeechAnnouncer {
     private func buildPhrase(direction: Double, label: String?) -> String {
         let locationWord = DirectionLabel.spokenPhrase(direction: direction)
         if let label, !label.isEmpty {
-            return "\(label.lowercased()) \(locationWord)"
+            return String(localized: "\(label.lowercased()) \(locationWord)")
         } else {
-            return "Sound from your \(locationWord)"
+            return String(localized: "Sound from your \(locationWord)")
         }
+    }
+
+    private func setSpeaking(_ speaking: Bool) {
+        guard speaking != isSpeaking else { return }
+        isSpeaking = speaking
+        onSpeakingChanged?(speaking)
+    }
+}
+
+extension SpeechAnnouncer: AVSpeechSynthesizerDelegate {
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        setSpeaking(true)
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        setSpeaking(false)
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        setSpeaking(false)
     }
 }

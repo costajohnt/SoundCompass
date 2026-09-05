@@ -70,7 +70,6 @@
 "Light" = "Suave";
 "Strong" = "Fuerte";
 
-"Speech" = "Voz";
 "Speak direction" = "Anunciar dirección";
 "Speech rate" = "Velocidad de voz";
 
@@ -93,3 +92,130 @@
 "Use the built-in mic, not a headset" = "Usa el micrófono integrado, no un auricular";
 "Bluetooth and wired headsets deliver a single mono channel, so direction cannot be estimated. SoundCompass will warn you if it detects a mono input." = "Los auriculares Bluetooth y con cable entregan un solo canal mono, así que no se puede estimar la dirección. SoundCompass te avisará si detecta una entrada mono.";
 "Got it" = "Entendido";
+
+// MARK: - Warnings
+
+"Microphone access denied." = "Acceso al micrófono denegado.";
+"Could not start recording: %@" = "No se pudo iniciar la grabación: %@";
+"Could not start audio: %@" = "No se pudo iniciar el audio: %@";
+"Audio route changed and could not be restarted: %@" = "La ruta de audio cambió y no se pudo reiniciar: %@";
+"The microphone did not report a usable audio format. Try again." = "El micrófono no informó de un formato de audio válido. Inténtalo de nuevo.";
+"This input only provides mono audio. Disconnect any headset and try again." = "Esta entrada solo ofrece audio mono. Desconecta los auriculares e inténtalo de nuevo.";
+"Open Settings" = "Abrir Ajustes";
+
+// MARK: - Front/back banner (dynamic)
+
+"Keep rotating… %lld°" = "Sigue girando… %lld°";
+"Sweep another %lld° so I can tell front from back." = "Gira otros %lld° para que pueda distinguir delante de detrás.";
+"Motion sensor unavailable" = "Sensor de movimiento no disponible";
+"Front/back disambiguation needs device motion data, which isn't available on this device. Arrow direction is otherwise accurate." = "Distinguir delante de detrás requiere datos de movimiento, que no están disponibles en este dispositivo. La dirección de la flecha es correcta en todo lo demás.";
+
+// MARK: - Hazards
+
+"Hazard sound" = "Sonido de peligro";
+"Hazard" = "Peligro";
+"Detected %@." = "Detectado %@.";
+"%@ detected %@" = "%@ detectado %@";
+"Hazard sound detected" = "Sonido de peligro detectado";
+"HAZARD" = "PELIGRO";
+
+// MARK: - Accessibility and speech
+
+"Recent sounds" = "Sonidos recientes";
+"Detected sound" = "Sonido detectado";
+"Sound direction compass" = "Brújula de dirección del sonido";
+"Sound %@, loudness %lld percent" = "Sonido %@, volumen %lld por ciento";
+"far left" = "muy a la izquierda";
+"left" = "a la izquierda";
+"ahead" = "delante";
+"right" = "a la derecha";
+"far right" = "muy a la derecha";
+"%@ %@" = "%@ %@";
+"Sound from your %@" = "Sonido %@";
+
+// MARK: - Controls
+
+
+// MARK: - Settings sheet
+
+"Which ear hears?" = "¿Con qué oído oyes?";
+"Hearing ear" = "Oído que oye";
+"Not specified" = "Sin especificar";
+"When audio passthrough is on, SoundCompass sends the room audio to this ear. Leave it unspecified to hear it in both." = "Cuando la transmisión de audio está activada, SoundCompass envía el sonido de la sala a este oído. Déjalo sin especificar para oírlo en ambos.";
+"Audio passthrough" = "Transmisión de audio";
+"Stream through good ear (CROS)" = "Transmitir al oído bueno (CROS)";
+"With headphones connected, SoundCompass routes the phone's stereo microphone audio into the ear you hear with, so you get some sense of sounds from your deaf side. Works with wired, USB-C, AirPlay and Bluetooth headphones — never through the phone's speaker. Bluetooth adds a noticeable delay; wired headphones are best." = "Con auriculares conectados, SoundCompass envía el audio estéreo de los micrófonos del teléfono al oído con el que oyes, para que percibas los sonidos de tu lado sordo. Funciona con auriculares con cable, USB-C, AirPlay y Bluetooth — nunca por el altavoz del teléfono. El Bluetooth añade un retardo apreciable; los auriculares con cable son la mejor opción.";
+"Safety" = "Seguridad";
+"Alert on hazard sounds" = "Avisar de sonidos de peligro";
+"When a siren, alarm, horn, or reversing beep is detected, the arrow jumps straight to the latest direction (no smoothing), a red banner appears, the phone plays a strong haptic pattern, and a paired Apple Watch taps once firmly. Recommended on." = "Cuando se detecta una sirena, alarma, bocina o pitido de marcha atrás, la flecha salta directamente a la última dirección (sin suavizado), aparece un aviso rojo, el teléfono reproduce un patrón háptico fuerte y un Apple Watch emparejado da un toque firme. Se recomienda activado.";
+"Voice" = "Voz";
+"System default" = "Predeterminada del sistema";
+"Appearance" = "Apariencia";
+"Theme" = "Tema";
+"System" = "Sistema";
+"Dark" = "Oscuro";
+"Measure ILD in 1–8 kHz band" = "Medir la ILD en la banda de 1–8 kHz";
+"Calibration trace…" = "Traza de calibración…";
+"Reset ILD calibration" = "Restablecer la calibración de ILD";
+"default" = "predeterminada";
+"calibrated" = "calibrada";
+"ILD gain %.1f (%@). The band toggle restricts the level comparison to frequencies where the phone's beams actually diverge; it is experimental until measured on more devices. The DSP stats toggle also writes a per-frame CSV trace to the app's Documents folder." = "Ganancia ILD %.1f (%@). La opción de banda limita la comparación de nivel a las frecuencias en las que los haces del teléfono realmente divergen; es experimental hasta medirla en más dispositivos. La opción de estadísticas DSP también escribe una traza CSV por fotograma en la carpeta Documentos de la app.";
+"Help & FAQ" = "Ayuda y preguntas frecuentes";
+
+// MARK: - Onboarding
+
+
+// MARK: - Help
+
+"Help" = "Ayuda";
+"How does SoundCompass know where a sound is?" = "¿Cómo sabe SoundCompass dónde está un sonido?";
+"Modern iPhones have several microphones, and iOS combines them into a stereo picture of the room. When a sound comes from your left, the left channel of that picture is a little louder than the right. SoundCompass measures that level difference many times a second and turns it into the arrow. Expect it to tell left from centre from right reliably; the exact angle is an estimate." = "Los iPhone modernos tienen varios micrófonos, e iOS los combina en una imagen estéreo de la sala. Cuando un sonido viene de tu izquierda, el canal izquierdo de esa imagen es un poco más fuerte que el derecho. SoundCompass mide esa diferencia de nivel muchas veces por segundo y la convierte en la flecha. Distingue con fiabilidad izquierda, centro y derecha; el ángulo exacto es una estimación.";
+"Why does the arrow sometimes flip?" = "¿Por qué a veces se invierte la flecha?";
+"A two-microphone array cannot tell front from back on its own — a sound in front and a mirror-image sound behind produce the same left/right cue. If you rotate your body a few degrees, SoundCompass watches the direction change with your yaw and commits to \"in front of you\" or \"behind you\"." = "Un par de micrófonos no distingue por sí solo delante de detrás — un sonido delante y su imagen especular detrás producen la misma señal izquierda/derecha. Si giras el cuerpo unos grados, SoundCompass observa cómo cambia la dirección con el giro y decide entre \"delante de ti\" o \"detrás de ti\".";
+"It thinks everything is mono. What's wrong?" = "Cree que todo es mono. ¿Qué pasa?";
+"You're probably connected to a Bluetooth or wired headset, which only delivers a single channel to the app. Disconnect it and use the built-in mic instead. You'll see a yellow banner when SoundCompass detects a mono input." = "Probablemente tienes conectados unos auriculares Bluetooth o con cable, que solo entregan un canal a la app. Desconéctalos y usa el micrófono integrado. Verás un aviso amarillo cuando SoundCompass detecte una entrada mono.";
+"Does any of my audio leave the phone?" = "¿Sale algo de mi audio del teléfono?";
+"No. SoundCompass does all of its processing on-device. Nothing is sent to any server. The sound classifier is Apple's built-in model that also runs locally." = "No. SoundCompass procesa todo en el dispositivo. No se envía nada a ningún servidor. El clasificador de sonidos es el modelo integrado de Apple, que también se ejecuta en local.";
+"How should I hold the phone?" = "¿Cómo debo sujetar el teléfono?";
+"Flat on your palm, screen facing up, the top edge of the phone pointing the way you're facing. The compass dial on screen is calibrated for that orientation — hold it like a real compass." = "En horizontal sobre la palma, con la pantalla hacia arriba y el borde superior apuntando hacia donde miras. La esfera de la brújula está calibrada para esa orientación — sujétalo como una brújula real.";
+"The arrow is jittery." = "La flecha tiembla.";
+"Open Settings and set Sensitivity to \"Calm\". That increases the smoothing so the arrow moves more slowly. \"Snappy\" does the opposite — faster, less stable — and \"Balanced\" is the default." = "Abre Ajustes y pon la Sensibilidad en \"Tranquila\". Eso aumenta el suavizado para que la flecha se mueva más despacio. \"Rápida\" hace lo contrario — más rápida, menos estable — y \"Equilibrada\" es la opción por defecto.";
+"Can I use the watch without the phone?" = "¿Puedo usar el reloj sin el teléfono?";
+"Not yet. The Apple Watch companion is a mirror: the phone does the audio processing and sends direction updates to the watch over WatchConnectivity. Standalone watch processing is on the roadmap." = "Todavía no. La app del Apple Watch es un espejo: el teléfono procesa el audio y envía la dirección al reloj mediante WatchConnectivity. El procesamiento autónomo en el reloj está en la hoja de ruta.";
+
+// MARK: - History
+
+"No events yet" = "Aún no hay eventos";
+"Sounds the classifier identifies while SoundCompass is listening will appear here." = "Aquí aparecerán los sonidos que el clasificador identifique mientras SoundCompass escucha.";
+"Session" = "Sesión";
+"Events" = "Eventos";
+"Clear events" = "Borrar eventos";
+"Export CSV" = "Exportar CSV";
+"Duration" = "Duración";
+"Hazards" = "Peligros";
+"Most frequent sound: %@" = "Sonido más frecuente: %@";
+"Most frequent direction: %@" = "Dirección más frecuente: %@";
+"%@ · %lld%% loudness" = "%@ · %lld %% de volumen";
+
+// MARK: - Calibration
+
+"Calibration" = "Calibración";
+"Offline trace" = "Traza sin conexión";
+"Record five seconds of a known sound — a clap on your left, a kettle on your right, someone saying your name from behind — and SoundCompass will run the recording through its DSP pipeline and show you how the estimated direction evolved over time. No audio leaves the phone." = "Graba cinco segundos de un sonido conocido — una palmada a tu izquierda, una tetera a tu derecha, alguien diciendo tu nombre desde atrás — y SoundCompass pasará la grabación por su cadena de DSP y te mostrará cómo evolucionó la dirección estimada. Ningún audio sale del teléfono.";
+"Ready" = "Listo";
+"Tap Record to capture five seconds of stereo audio." = "Pulsa Grabar para capturar cinco segundos de audio estéreo.";
+"Recording…" = "Grabando…";
+"%.1fs remaining" = "%.1f s restantes";
+"Run through the offline DSP; trace is below." = "Procesado por el DSP sin conexión; la traza está abajo.";
+"Failed" = "Error";
+"Direction over time" = "Dirección a lo largo del tiempo";
+"Summary" = "Resumen";
+"Peak loudness" = "Volumen máximo";
+"Average direction" = "Dirección media";
+"Peak |ILD|" = "|ILD| máxima";
+"Use as calibration" = "Usar como calibración";
+"If this recording was a sound held hard to one side at about a metre, storing it sets this phone's full-scale level difference. Suggested ILD gain: %.1f (current %.1f)." = "Si esta grabación fue un sonido situado claramente a un lado a aproximadamente un metro, guardarla fija la diferencia de nivel a escala completa de este teléfono. Ganancia ILD sugerida: %.1f (actual %.1f).";
+"Store as this device's ILD gain" = "Guardar como ganancia ILD de este dispositivo";
+"Not enough confident windows in this recording to derive a gain. Record again with a louder, sustained sound held to one side." = "No hay suficientes ventanas fiables en esta grabación para derivar una ganancia. Graba de nuevo con un sonido más fuerte y sostenido situado a un lado.";
+"Cancel recording" = "Cancelar grabación";
+"Record 5 seconds" = "Grabar 5 segundos";

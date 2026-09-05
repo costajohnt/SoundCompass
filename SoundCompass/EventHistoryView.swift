@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Scrollable, chronological list of every classifier label the detector
 /// has seen during the current session. The first row is the most
@@ -44,7 +45,7 @@ struct EventHistoryView: View {
                                 Label("Clear events", systemImage: "trash")
                             }
                             ShareLink(
-                                item: exportURL(),
+                                item: EventCSV(csv: stats.csv(events: store.events)),
                                 preview: SharePreview("SoundCompass events.csv", image: Image(systemName: "doc.text"))
                             ) {
                                 Label("Export CSV", systemImage: "square.and.arrow.up")
@@ -61,15 +62,19 @@ struct EventHistoryView: View {
             }
         }
     }
+}
 
-    /// Write the current CSV into a unique temp file and return a URL
-    /// that `ShareLink` can wrap in `UIActivityViewController`.
-    private func exportURL() -> URL {
-        let csv = stats.csv(events: store.events)
-        let name = "SoundCompass-\(Int(Date().timeIntervalSince1970)).csv"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
-        try? csv.data(using: .utf8)?.write(to: url, options: .atomic)
-        return url
+/// The CSV export as a `Transferable`, so no temp file is written until
+/// the user actually shares (the previous version wrote one on every body
+/// evaluation).
+private struct EventCSV: Transferable {
+    let csv: String
+
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(exportedContentType: .commaSeparatedText) { item in
+            Data(item.csv.utf8)
+        }
+        .suggestedFileName("SoundCompass events.csv")
     }
 }
 
@@ -99,12 +104,12 @@ private struct SessionSummary: View {
         .padding(.vertical, 4)
     }
 
-    private func summaryCell(title: String, value: String, tint: Color = .primary) -> some View {
+    private func summaryCell(title: LocalizedStringKey, value: String, tint: Color = .primary) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            Text(value)
+            Text(verbatim: value)
                 .font(.headline)
                 .foregroundStyle(tint)
                 .monospacedDigit()
@@ -138,7 +143,7 @@ private struct EventRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(event.label)
+                    Text(verbatim: event.label)
                         .font(.body.weight(.semibold))
                     if event.isHazard {
                         Text("HAZARD")
@@ -149,10 +154,10 @@ private struct EventRow: View {
                             .foregroundStyle(.red)
                     }
                 }
-                Text(directionDescription)
+                Text("\(DirectionLabel.label(for: event.direction)) · \(Int(event.magnitude * 100))% loudness")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text(EventRow.timeFormatter.string(from: event.timestamp))
+                Text(verbatim: EventRow.timeFormatter.string(from: event.timestamp))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -167,12 +172,6 @@ private struct EventRow: View {
 
     private var tint: Color {
         event.isHazard ? .red : .cyan
-    }
-
-    private var directionDescription: String {
-        let bucket = DirectionLabel.label(for: event.direction)
-        let loudness = Int(event.magnitude * 100)
-        return "\(bucket) · \(loudness)% loudness"
     }
 }
 

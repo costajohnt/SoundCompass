@@ -10,6 +10,13 @@ import UserNotifications
 /// `HazardNotifier` requests authorization lazily the first time a
 /// hazard is posted; if the user denies it, the class silently becomes
 /// a no-op for the rest of the session.
+///
+/// The interruption level is `.timeSensitive`, which needs the
+/// Time Sensitive Notifications entitlement declared in
+/// `SoundCompass/SoundCompass.entitlements`; without it iOS silently
+/// downgrades to `.active`. Critical alerts (`.defaultCritical`) require
+/// a separate Apple-approved entitlement this app does not have, so the
+/// sound is the regular default.
 final class HazardNotifier {
 
     private let center = UNUserNotificationCenter.current()
@@ -38,7 +45,7 @@ final class HazardNotifier {
             deliver(label: label, direction: direction)
             lastPostedAt = now
         case .unknown:
-            center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, _ in
+            center.requestAuthorization(options: [.alert, .sound, .timeSensitive]) { [weak self] granted, _ in
                 guard let self else { return }
                 DispatchQueue.main.async {
                     self.authState = granted ? .granted : .denied
@@ -53,9 +60,9 @@ final class HazardNotifier {
 
     private func deliver(label: String, direction: Double) {
         let content = UNMutableNotificationContent()
-        content.title = "Hazard sound detected"
+        content.title = String(localized: "Hazard sound detected")
         content.body = "\(label) · \(DirectionLabel.label(for: direction))"
-        content.sound = .defaultCritical
+        content.sound = .default
         content.interruptionLevel = .timeSensitive
 
         let request = UNNotificationRequest(

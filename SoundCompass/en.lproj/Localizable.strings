@@ -76,7 +76,6 @@
 "Light" = "Light";
 "Strong" = "Strong";
 
-"Speech" = "Speech";
 "Speak direction" = "Speak direction";
 "Speech rate" = "Speech rate";
 
@@ -99,3 +98,39 @@
 "Use the built-in mic, not a headset" = "Use the built-in mic, not a headset";
 "Bluetooth and wired headsets deliver a single mono channel, so direction cannot be estimated. SoundCompass will warn you if it detects a mono input." = "Bluetooth and wired headsets deliver a single mono channel, so direction cannot be estimated. SoundCompass will warn you if it detects a mono input.";
 "Got it" = "Got it";
+
+// MARK: - Added 2026-09 (keys are the English source strings; English
+// entries exist so the file documents every key the app looks up)
+
+"Keep rotating… %lld°" = "Keep rotating… %lld°";
+"Sweep another %lld° so I can tell front from back." = "Sweep another %lld° so I can tell front from back.";
+"Motion sensor unavailable" = "Motion sensor unavailable";
+"Front/back disambiguation needs device motion data, which isn't available on this device. Arrow direction is otherwise accurate." = "Front/back disambiguation needs device motion data, which isn't available on this device. Arrow direction is otherwise accurate.";
+"Hazard sound" = "Hazard sound";
+"Hazard" = "Hazard";
+"Detected %@." = "Detected %@.";
+"%@ detected %@" = "%@ detected %@";
+"Recent sounds" = "Recent sounds";
+"Detected sound" = "Detected sound";
+"Sound direction compass" = "Sound direction compass";
+"Sound %@, loudness %lld percent" = "Sound %@, loudness %lld percent";
+"far left" = "far left";
+"left" = "left";
+"ahead" = "ahead";
+"right" = "right";
+"far right" = "far right";
+"%@ %@" = "%@ %@";
+"Sound from your %@" = "Sound from your %@";
+"Microphone access denied." = "Microphone access denied.";
+"Could not start recording: %@" = "Could not start recording: %@";
+"Could not start audio: %@" = "Could not start audio: %@";
+"Audio route changed and could not be restarted: %@" = "Audio route changed and could not be restarted: %@";
+"The microphone did not report a usable audio format. Try again." = "The microphone did not report a usable audio format. Try again.";
+"This input only provides mono audio. Disconnect any headset and try again." = "This input only provides mono audio. Disconnect any headset and try again.";
+"Hazard sound detected" = "Hazard sound detected";
+"Open Settings" = "Open Settings";
+"Not specified" = "Not specified";
+"System" = "System";
+"Dark" = "Dark";
+"default" = "default";
+"calibrated" = "calibrated";
