@@ -41,6 +41,28 @@ final class SettingsStoreTests: XCTestCase {
         )
     }
 
+    func testIldCalibrationRoundTrip() {
+        let defaults = isolatedDefaults()
+        let store = SettingsStore(defaults: defaults)
+        XCTAssertNil(store.ildGain)
+        XCTAssertFalse(store.ildHighBand)
+
+        store.ildGain = 18.5
+        store.ildHighBand = true
+        let reloaded = SettingsStore(defaults: defaults)
+        XCTAssertEqual(reloaded.ildGain ?? 0, 18.5, accuracy: 0.0001)
+        XCTAssertTrue(reloaded.ildHighBand)
+
+        reloaded.ildGain = nil
+        XCTAssertNil(SettingsStore(defaults: defaults).ildGain)
+    }
+
+    func testHearingEarPan() {
+        XCTAssertEqual(SettingsStore.HearingEar.left.pan, -1)
+        XCTAssertEqual(SettingsStore.HearingEar.right.pan, 1)
+        XCTAssertEqual(SettingsStore.HearingEar.unspecified.pan, 0)
+    }
+
     func testPersistenceRoundTrip() {
         let defaults = isolatedDefaults()
         let store = SettingsStore(defaults: defaults)
@@ -81,6 +103,8 @@ final class SettingsStoreTests: XCTestCase {
             "soundcompass.settings.speech",
             "soundcompass.settings.speechRate",
             "soundcompass.settings.debug",
+            "soundcompass.settings.ildGain",
+            "soundcompass.settings.ildHighBand",
         ]
         for key in keys {
             UserDefaults.standard.removeObject(forKey: key)

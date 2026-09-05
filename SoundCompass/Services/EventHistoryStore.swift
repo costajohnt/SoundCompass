@@ -23,12 +23,16 @@ final class EventHistoryStore: ObservableObject {
     @Published private(set) var events: [Event] = []
 
     private let maxEvents: Int
+    private let now: () -> Date
     private var lastRawIdentifier: String?
     private var lastTimestamp: Date = .distantPast
     private let minInterval: TimeInterval = 0.8
 
-    init(maxEvents: Int = 50) {
+    /// `now` is injectable so tests can drive the coalescing window
+    /// without sleeping.
+    init(maxEvents: Int = 50, now: @escaping () -> Date = { Date() }) {
         self.maxEvents = maxEvents
+        self.now = now
     }
 
     /// Records an event. Consecutive events with the same identifier
@@ -41,7 +45,7 @@ final class EventHistoryStore: ObservableObject {
         magnitude: Double,
         isHazard: Bool
     ) {
-        let now = Date()
+        let now = self.now()
         if rawIdentifier == lastRawIdentifier,
            now.timeIntervalSince(lastTimestamp) < minInterval {
             return

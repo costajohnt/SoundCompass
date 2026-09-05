@@ -53,22 +53,24 @@ final class DSPDiagnostics {
             handle = try? FileHandle(forWritingTo: fileURL)
             startedAt = Date()
             write("# \(config)\n")
-            write("t,leftRms,rightRms,ildRaw,lag,itdConf,rawDir,smoothDir,magnitude\n")
+            write("t,leftRms,rightRms,ildLeftRms,ildRightRms,ildRaw,lag,itdConf,rawDir,smoothDir,magnitude,bandILD\n")
         }
     }
 
     /// Append one DSP frame. `smoothDir` is the post-smoothing published
-    /// direction; everything else comes straight from `DirectionEstimate`.
-    /// No-op unless an enabled `begin` opened the trace.
-    func append(estimate: DirectionEstimate, smoothDir: Double, magnitude: Double) {
+    /// direction; `bandILD` is a `name:ild|name:ild` summary of the
+    /// per-band raw level differences; everything else comes straight from
+    /// `DirectionEstimate`. No-op unless an enabled `begin` opened the trace.
+    func append(estimate: DirectionEstimate, smoothDir: Double, magnitude: Double, bandILD: String = "") {
         queue.async { [self] in
             guard let startedAt else { return }
             let t = Date().timeIntervalSince(startedAt)
             write(String(
-                format: "%.2f,%.5f,%.5f,%.4f,%d,%.2f,%.3f,%.3f,%.3f\n",
-                t, estimate.leftRms, estimate.rightRms, estimate.rawILD,
+                format: "%.2f,%.5f,%.5f,%.5f,%.5f,%.4f,%d,%.2f,%.3f,%.3f,%.3f,%@\n",
+                t, estimate.leftRms, estimate.rightRms,
+                estimate.ildLeftRms, estimate.ildRightRms, estimate.rawILD,
                 estimate.lagSamples, estimate.itdConfidence,
-                estimate.direction, smoothDir, magnitude
+                estimate.direction, smoothDir, magnitude, bandILD
             ))
         }
     }

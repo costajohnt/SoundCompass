@@ -16,10 +16,13 @@ final class SessionStats: ObservableObject {
         var labelCounts: [String: Int]
         var directionBucketCounts: [String: Int]
 
-        var duration: TimeInterval {
+        /// Elapsed time; `now` supplies the clock for a session still running.
+        func elapsed(at now: Date) -> TimeInterval {
             guard let startedAt else { return 0 }
-            return (endedAt ?? Date()).timeIntervalSince(startedAt)
+            return (endedAt ?? now).timeIntervalSince(startedAt)
         }
+
+        var duration: TimeInterval { elapsed(at: Date()) }
 
         var topLabel: String? {
             labelCounts.max(by: { $0.value < $1.value })?.key
@@ -31,6 +34,14 @@ final class SessionStats: ObservableObject {
     }
 
     @Published private(set) var snapshot: Snapshot = SessionStats.emptySnapshot()
+
+    private let now: () -> Date
+    private static let isoFormatter = ISO8601DateFormatter()
+
+    /// `now` is injectable so duration tests do not need to sleep.
+    init(now: @escaping () -> Date = { Date() }) {
+        self.now = now
+    }
 
     private static func emptySnapshot() -> Snapshot {
         Snapshot(
@@ -47,13 +58,13 @@ final class SessionStats: ObservableObject {
     /// engine start.
     func begin() {
         snapshot = Self.emptySnapshot()
-        snapshot.startedAt = Date()
+        snapshot.startedAt = now()
     }
 
     /// Called from `AudioDirectionDetector.stop()` so the snapshot
     /// freezes at the end time.
     func end() {
-        snapshot.endedAt = Date()
+        snapshot.endedAt = now()
     }
 
     /// Record a detector event (either hazard or normal classifier
@@ -76,7 +87,7 @@ final class SessionStats: ObservableObject {
         var lines: [String] = []
         lines.append("timestamp,label,rawIdentifier,direction,magnitude,hazard")
         for event in events.reversed() {
-            let ts = ISO8601DateFormatter().string(from: event.timestamp)
+            let ts = SessionStats.isoFormatter.string(from: event.timestamp)
             let rawId = event.rawIdentifier?.replacingOccurrences(of: ",", with: " ") ?? ""
             let label = event.label.replacingOccurrences(of: ",", with: " ")
             lines.append(

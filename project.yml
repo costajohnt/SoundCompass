@@ -53,11 +53,13 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.costajohnt.soundcompass
         TARGETED_DEVICE_FAMILY: "1,2"
-        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
-        SWIFT_OBJC_BRIDGING_HEADER: SoundCompass/SoundCompass-Bridging-Header.h
+        # Time Sensitive Notifications for the background hazard alert.
+        CODE_SIGN_ENTITLEMENTS: SoundCompass/SoundCompass.entitlements
     dependencies:
-      # Watch target requires a paired Apple Watch for free provisioning.
-      # Uncomment when building with a paid developer account.
+      # The watch app is not embedded by default: embedding requires a
+      # paired Apple Watch for free (Personal Team) provisioning, and the
+      # complication's App Group needs a paid developer account. With a
+      # paid account, uncomment to ship the watch app inside the iOS app.
       # - target: SoundCompassWatch
       #   embed: true
       - target: SoundCompassWidgets
@@ -75,6 +77,7 @@ targets:
       - path: Shared/CompassView.swift
       - path: Shared/DirectionLabel.swift
       - path: Shared/DirectionUpdate.swift
+      - path: Shared/SharedDefaults.swift
     info:
       path: SoundCompassWatch/Info.plist
       properties:
@@ -90,6 +93,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.costajohnt.soundcompass.watchkitapp
         TARGETED_DEVICE_FAMILY: "4"
         INFOPLIST_KEY_WKCompanionAppBundleIdentifier: com.costajohnt.soundcompass
+        # App Group shared with the complication extension.
+        CODE_SIGN_ENTITLEMENTS: SoundCompassWatch/SoundCompassWatch.entitlements
     dependencies:
       - target: SoundCompassWatchWidgets
         embed: true
@@ -104,6 +109,7 @@ targets:
     sources:
       - path: SoundCompassWatchWidgets
       - path: Shared/DirectionLabel.swift
+      - path: Shared/SharedDefaults.swift
     info:
       path: SoundCompassWatchWidgets/Info.plist
       properties:
@@ -116,6 +122,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.costajohnt.soundcompass.watchkitapp.widgets
         TARGETED_DEVICE_FAMILY: "4"
+        CODE_SIGN_ENTITLEMENTS: SoundCompassWatchWidgets/SoundCompassWatchWidgets.entitlements
 
   # ---------------------------------------------------------------
   # WidgetKit extension for Lock Screen / Dynamic Island Live Activity
@@ -188,6 +195,22 @@ schemes:
     test:
       targets:
         - SoundCompassTests
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  # watchOS-only scheme so CI can compile the companion app and the
+  # complication without the iOS targets in the way.
+  SoundCompass-watchOS:
+    build:
+      targets:
+        SoundCompassWatch: all
+        SoundCompassWatchWidgets: all
     run:
       config: Debug
     profile:

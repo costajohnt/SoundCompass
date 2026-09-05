@@ -2,9 +2,8 @@ import Combine
 import Foundation
 import SwiftUI
 
-/// User-facing configuration for SoundCompass. Backed by `UserDefaults`
-/// through `@AppStorage` so values survive across launches with no extra
-/// persistence code.
+/// User-facing configuration for SoundCompass, backed by `UserDefaults`
+/// so values survive across launches with no extra persistence code.
 ///
 /// `SettingsStore` is an `ObservableObject` so the SwiftUI settings sheet
 /// can bind directly to its properties, and so `AudioDirectionDetector`
@@ -22,20 +21,20 @@ final class SettingsStore: ObservableObject {
 
         var label: String {
             switch self {
-            case .low:    return "Calm"
-            case .medium: return "Balanced"
-            case .high:   return "Snappy"
+            case .low:    return String(localized: "Calm")
+            case .medium: return String(localized: "Balanced")
+            case .high:   return String(localized: "Snappy")
             }
         }
 
         var description: String {
             switch self {
             case .low:
-                return "Smoothest, slowest to react. Good for background monitoring."
+                return String(localized: "Smoothest, slowest to react. Good for background monitoring.")
             case .medium:
-                return "Default balance between responsiveness and stability."
+                return String(localized: "Default balance between responsiveness and stability.")
             case .high:
-                return "Jumps to new directions immediately. Good for brief, loud sounds."
+                return String(localized: "Jumps to new directions immediately. Good for brief, loud sounds.")
             }
         }
 
@@ -59,9 +58,9 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    /// Which ear the user hears with. Drives the haptic arm and the
-    /// future passthrough panner. `.unspecified` means the user hasn't
-    /// chosen yet; the UI treats that as symmetrical behavior.
+    /// Which ear the user hears with. Drives the passthrough panner.
+    /// `.unspecified` means the user hasn't chosen yet; passthrough then
+    /// plays to both ears.
     enum HearingEar: String, CaseIterable, Identifiable {
         case unspecified
         case left
@@ -71,9 +70,18 @@ final class SettingsStore: ObservableObject {
 
         var label: String {
             switch self {
-            case .unspecified: return "Not specified"
-            case .left:        return "Left"
-            case .right:       return "Right"
+            case .unspecified: return String(localized: "Not specified")
+            case .left:        return String(localized: "Left")
+            case .right:       return String(localized: "Right")
+            }
+        }
+
+        /// Pan for `AVAudioMixerNode` (`-1` = hard left, `+1` = hard right).
+        var pan: Float {
+            switch self {
+            case .left:        return -1.0
+            case .right:       return  1.0
+            case .unspecified: return  0
             }
         }
     }
@@ -89,9 +97,9 @@ final class SettingsStore: ObservableObject {
 
         var label: String {
             switch self {
-            case .system: return "System"
-            case .dark:   return "Dark"
-            case .light:  return "Light"
+            case .system: return String(localized: "System")
+            case .dark:   return String(localized: "Dark")
+            case .light:  return String(localized: "Light")
             }
         }
     }
@@ -105,9 +113,9 @@ final class SettingsStore: ObservableObject {
 
         var label: String {
             switch self {
-            case .off:    return "Off"
-            case .light:  return "Light"
-            case .strong: return "Strong"
+            case .off:    return String(localized: "Off")
+            case .light:  return String(localized: "Light")
+            case .strong: return String(localized: "Strong")
             }
         }
 
@@ -120,6 +128,13 @@ final class SettingsStore: ObservableObject {
             }
         }
     }
+
+    /// Band the ILD is measured in when `ildHighBand` is on. Apple's
+    /// beamformer has essentially no left/right directivity below ~1 kHz,
+    /// so restricting the level comparison to 1–8 kHz is expected to make
+    /// the cue larger relative to ambient jitter. Off by default until it
+    /// has been measured on more than one device (see AUDIT.md H6).
+    static let highBandILDRange: ClosedRange<Double> = 1_000...8_000
 
     // MARK: - Published state
 
@@ -163,6 +178,23 @@ final class SettingsStore: ObservableObject {
         didSet { defaults.set(theme.rawValue, forKey: Keys.theme) }
     }
 
+    /// Per-device ILD gain stored by the calibration screen; `nil` means
+    /// `DirectionEstimator.defaultIldGain`.
+    @Published var ildGain: Double? {
+        didSet {
+            if let ildGain {
+                defaults.set(ildGain, forKey: Keys.ildGain)
+            } else {
+                defaults.removeObject(forKey: Keys.ildGain)
+            }
+        }
+    }
+
+    /// Measure the ILD in `highBandILDRange` instead of broadband.
+    @Published var ildHighBand: Bool {
+        didSet { defaults.set(ildHighBand, forKey: Keys.ildHighBand) }
+    }
+
     private let defaults: UserDefaults
 
     // MARK: - Init
@@ -194,6 +226,9 @@ final class SettingsStore: ObservableObject {
         self.theme = Theme(
             rawValue: defaults.string(forKey: Keys.theme) ?? Theme.dark.rawValue
         ) ?? .dark
+        let storedGain = defaults.double(forKey: Keys.ildGain)
+        self.ildGain = storedGain > 0 ? storedGain : nil
+        self.ildHighBand = defaults.bool(forKey: Keys.ildHighBand)
     }
 
     // MARK: - Keys
@@ -209,5 +244,7 @@ final class SettingsStore: ObservableObject {
         static let voice        = "soundcompass.settings.voice"
         static let passthrough  = "soundcompass.settings.passthrough"
         static let theme        = "soundcompass.settings.theme"
+        static let ildGain      = "soundcompass.settings.ildGain"
+        static let ildHighBand  = "soundcompass.settings.ildHighBand"
     }
 }

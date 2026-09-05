@@ -5,8 +5,11 @@ import Foundation
 /// given window and where *each* band came from.
 ///
 /// Each band is carved out with a streaming `BiquadBandpass` applied
-/// independently to the left and right channels, after which the usual
-/// ILD + GCC-PHAT machinery runs on the filtered signal.
+/// independently to the left and right channels, after which an ILD-only
+/// `DirectionEstimator` runs on the filtered signal. GCC-PHAT is disabled
+/// per band: PHAT on a narrow-band signal is unreliable by construction,
+/// and on Apple's synthesized stereo the lag is pinned at zero anyway, so
+/// the three FFTs per band bought nothing.
 final class SubbandDirectionEstimator {
 
     struct Band: Equatable {
@@ -17,8 +20,15 @@ final class SubbandDirectionEstimator {
 
     struct BandResult: Equatable {
         let band: Band
+        /// Direction in user space (already multiplied by `directionSign`).
         let direction: Double
+        /// Raw combined RMS of the band (not clamped), for inter-band
+        /// loudness comparison.
         let magnitude: Double
+        /// Raw normalized level difference `(R−L)/(R+L)` inside the band,
+        /// before gain and sign. Logged by `DSPDiagnostics` so the
+        /// per-band directional cue can be measured on a device.
+        let rawILD: Double
     }
 
     let bands: [Band]
@@ -43,7 +53,7 @@ final class SubbandDirectionEstimator {
         self.bands = usable
 
         self.estimators = usable.map { _ in
-            DirectionEstimator(sampleRate: sampleRate, frameCount: frameCount)
+            DirectionEstimator(sampleRate: sampleRate, frameCount: frameCount, usesITD: false)
         }
         self.leftFilters = usable.map {
             BiquadBandpass(sampleRate: sampleRate, lowHz: $0.lowHz, highHz: $0.highHz)
@@ -55,13 +65,20 @@ final class SubbandDirectionEstimator {
         self.rightScratch = [Float](repeating: 0, count: frameCount)
     }
 
+    /// Propagate a calibrated ILD gain to every band estimator.
+    func setIldGain(_ gain: Double) {
+        estimators.forEach { $0.ildGain = gain }
+    }
+
     /// Compute per-band direction + magnitude for the given stereo window.
     /// Returns one result per configured band, in the order the bands were
-    /// supplied at init time.
+    /// supplied at init time. `directionSign` un-mirrors a front-source
+    /// capture (`-1`) so results are in user space.
     func estimate(
         left: UnsafePointer<Float>,
         right: UnsafePointer<Float>,
-        frameCount: Int
+        frameCount: Int,
+        directionSign: Double = 1
     ) -> [BandResult] {
         let frameCount = min(frameCount, self.frameCount)
 
@@ -88,8 +105,9 @@ final class SubbandDirectionEstimator {
 
             results.append(BandResult(
                 band: bands[i],
-                direction: estimate.direction,
-                magnitude: estimate.combinedRms
+                direction: estimate.direction * directionSign,
+                magnitude: estimate.combinedRms,
+                rawILD: estimate.rawILD
             ))
         }
 

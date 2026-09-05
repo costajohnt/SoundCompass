@@ -11,7 +11,8 @@ import WatchConnectivity
 ///   latest value is still delivered the next time the watch wakes up.
 ///
 /// Updates are rate-limited to ~6 per second so we don't saturate the IPC
-/// channel with 50 Hz tap callbacks.
+/// channel with tap callbacks. A hazard transition bypasses the rate
+/// limit so the watch can escalate its haptic without delay.
 final class WatchSessionManager: NSObject, ObservableObject {
 
     @Published private(set) var isPaired: Bool = false
@@ -20,6 +21,7 @@ final class WatchSessionManager: NSObject, ObservableObject {
     private let session: WCSession = .default
     private let queue = DispatchQueue(label: "com.soundcompass.watchsession")
     private var lastSent: Date = .distantPast
+    private var lastHazard = false
     private let minInterval: TimeInterval = 0.15
 
     override init() {
@@ -34,20 +36,23 @@ final class WatchSessionManager: NSObject, ObservableObject {
 
     /// Send a direction update. Safe to call from any thread; internally
     /// hops onto a private queue for rate limiting and delivery.
-    func send(direction: Double, magnitude: Double, label: String?) {
+    func send(direction: Double, magnitude: Double, label: String?, isHazard: Bool = false) {
         queue.async { [weak self] in
             guard let self else { return }
             guard self.session.activationState == .activated else { return }
 
             let now = Date()
-            guard now.timeIntervalSince(self.lastSent) > self.minInterval else { return }
+            let hazardChanged = isHazard != self.lastHazard
+            guard hazardChanged || now.timeIntervalSince(self.lastSent) > self.minInterval else { return }
             self.lastSent = now
+            self.lastHazard = isHazard
 
             let update = DirectionUpdate(
                 direction: direction,
                 magnitude: magnitude,
                 label: label,
-                timestamp: now
+                timestamp: now,
+                isHazard: isHazard
             )
 
             if self.session.isReachable {

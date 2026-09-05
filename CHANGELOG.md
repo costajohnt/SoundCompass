@@ -5,7 +5,70 @@ a commit on the development branch.
 
 ## Unreleased
 
-### Fixed
+### Fixed (audit follow-up — see `AUDIT.md` for the findings)
+
+- **Front/back resolver sign.** CoreMotion yaw is counter-clockwise
+  positive, so a source in front makes direction *grow* with yaw. The
+  resolver had the two cases swapped; the tests encoded the same wrong
+  assumption. Both fixed, plus a physically derived clockwise-turn test.
+- **Bluetooth passthrough.** The session now sets `.allowBluetoothA2DP`;
+  without it `playAndRecord` never routes output to Bluetooth headphones
+  and the CROS feature could only work over a wire. HFP stays disallowed
+  so the built-in stereo mic remains the input. The I/O buffer is
+  shortened to 10 ms while passthrough is connected.
+- **Stale classifier label re-arming hazards.** Labels are now cleared by
+  a low-confidence result and expire after 2.5 s (`ClassifierLabelTracker`);
+  the banner logic is an explicit edge-triggered `HazardGate`.
+- **Watch complication never updated.** It read `UserDefaults.standard`
+  in its own sandbox. Both watch targets now share an App Group suite
+  (`SharedDefaults`), with entitlements checked in, and timeline reloads
+  are throttled to WidgetKit's budget.
+- **Hazard identifier list** validated against Apple's real
+  `knownClassifications` in a simulator test; keyword rules (`siren`,
+  `alarm`, `horn`, …, with musical-instrument exclusions) catch the
+  specific variants.
+- **Route-change restart storm** guarded: the tap is reinstalled only when
+  the input port set actually changed.
+- **Invalid input format** (0 Hz / 0 ch) now throws a Swift error instead
+  of an uncatchable Objective-C exception from `installTap`.
+- **Buffers larger than 2048 frames** are processed in chunks instead of
+  having their tail dropped.
+- **Speech and haptic self-excitation.** Microphone input is muted while
+  the synthesizer speaks and briefly after each haptic.
+- **Front/back answer vanishing** seconds after the user stops turning:
+  results are latched for ten seconds.
+- **Time-sensitive hazard notifications** now carry the entitlement they
+  need; the unavailable critical-alert sound was replaced with `.default`.
+- **Localization actually applies.** Views that received `String` values
+  used the non-localizing `Text` initializer; they now take
+  `LocalizedStringKey` or `String(localized:)`. Spanish coverage extended
+  to Settings, Help, History, Calibration and the dynamic banners.
+- **Calibration recorder** used the first stereo source and could be
+  mirrored relative to the live compass; both now share
+  `AudioSessionConfigurator`.
+- Settings copy no longer promises watch behaviour that did not exist;
+  the watch now does tap on hazards (`DirectionUpdate.isHazard`).
+- Documentation drift (bundle prefix, repo name, paths, deployment
+  targets, DSP description, test counts, license) corrected throughout.
+
+### Added
+
+- `DirectionSmoother` — one smoother shared by the live pipeline and the
+  calibration trace, unit-tested.
+- Per-device ILD gain: the calibration screen derives a gain from a
+  hard-side recording and stores it (`SettingsStore.ildGain`).
+- Developer option to measure the ILD in a 1–8 kHz band
+  (`BiquadBandLimiter`), off by default pending device measurements.
+- Per-band and ILD-source RMS columns in the diagnostics trace.
+- `SoundCompass-watchOS` scheme and a watchOS build job in CI.
+- 45 new unit tests (120 total); clock injection removed all sleeps.
+
+### Removed
+
+- Unused `ObjCExceptionCatcher` and bridging header; unused `Log`
+  categories; per-band GCC-PHAT (ILD-only per band, 3× cheaper).
+
+### Previously in Unreleased
 
 - **Direction-finding audit** — root-caused the inaccurate direction
   estimates and fixed the pipeline end to end:
@@ -28,8 +91,6 @@ a commit on the development branch.
     active data source, raw ILD/ITD, lag, and ITD confidence live.
   - New regression tests: uncorrelated noise stays centered; railed lag
     is ignored.
-
-### Added
 
 - **Hardening pass**
   - `ContentView.regularLayout` was collapsing the right-column

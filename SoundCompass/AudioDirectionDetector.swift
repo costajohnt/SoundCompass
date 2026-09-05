@@ -2,22 +2,27 @@ import AVFoundation
 import Accelerate
 import Combine
 import Foundation
+import os
 
 /// The top-level audio capture + processing object the SwiftUI views talk to.
 ///
 /// `AudioDirectionDetector` owns the `AVAudioEngine` tap and a suite of
 /// processors:
 ///
-/// * `DirectionEstimator` — broadband ITD + ILD → `direction`, `magnitude`.
+/// * `DirectionEstimator` — broadband ILD (+ optional ITD) → raw estimate.
+/// * `DirectionSmoother` — the exponential smoother behind `direction`
+///   and `magnitude`.
 /// * `SubbandDirectionEstimator` — per-band direction + magnitude so we can
 ///   tell rumble from speech from alarms.
 /// * `SoundClassifier` — Apple's built-in `SNClassifySoundRequest` to tag
 ///   the loudest sound ("speech", "car horn", "dog bark", …).
+/// * `HazardGate` — edge-triggered hazard banner state.
 /// * `SpeechAnnouncer` — optional spoken callouts through the hearing ear.
 /// * `WatchSessionManager` — mirrors everything to the watchOS companion.
 ///
-/// The DSP runs on the real-time tap thread; @Published updates are
-/// dispatched onto the main queue.
+/// The DSP runs on the engine's tap thread (not the real-time render
+/// thread, but it must keep up); @Published updates are dispatched onto
+/// the main queue once per tap buffer.
 final class AudioDirectionDetector: ObservableObject {
 
     // MARK: - Published state
@@ -27,6 +32,9 @@ final class AudioDirectionDetector: ObservableObject {
     @Published private(set) var isRunning: Bool = false
     @Published private(set) var isMono: Bool = false
     @Published private(set) var lastError: String?
+    /// `true` when `lastError` is a microphone-permission denial, so the
+    /// UI can offer the Settings deep link instead of a generic banner.
+    @Published private(set) var isPermissionDenied: Bool = false
     @Published private(set) var bandResults: [SubbandDirectionEstimator.BandResult] = []
     @Published private(set) var dominantBandName: String?
 
@@ -73,10 +81,15 @@ final class AudioDirectionDetector: ObservableObject {
     private let engine = AVAudioEngine()
     private let session = AVAudioSession.sharedInstance()
 
-    // DSP state. Accessed only from the tap thread after `start()` returns.
+    // DSP state. Accessed only from the tap thread after `start()` returns
+    // (the estimators are rebuilt only while the tap is removed).
     private var estimator: DirectionEstimator?
     private var subband: SubbandDirectionEstimator?
     private let bufferFrames: AVAudioFrameCount = 2048
+
+    /// Main-thread state behind `direction` / `magnitude` / hazard banner.
+    private var smoother = DirectionSmoother()
+    private var hazardGate = HazardGate()
 
     /// `-1` when the active stereo data source delivers a mirrored image
     /// (front source), `+1` otherwise. Written in `configureSession()`
@@ -88,9 +101,16 @@ final class AudioDirectionDetector: ObservableObject {
     private var activeSourceDescription: String = "?"
 
     /// Set once the mono-input diagnostic marker has been written for the
-    /// current tap; reset on every `installTap()`. Keeps the real-time tap
-    /// thread from allocating a note string per mono frame.
+    /// current tap; reset on every `installTap()`. Keeps the tap thread
+    /// from allocating a note string per mono frame.
     private var loggedMonoDiagnostic = false
+
+    /// Frames received before this instant are ignored for direction and
+    /// classification: the phone's own speech callouts and haptic taps
+    /// are picked up by the microphones 10 cm away and would otherwise
+    /// classify as "speech" / register as low-band thumps. Written on the
+    /// main thread, read on the tap thread.
+    private let muteUntil = OSAllocatedUnfairLock<Date>(initialState: .distantPast)
 
     // Lifecycle bookkeeping.
     private var isStarting = false
@@ -125,21 +145,41 @@ final class AudioDirectionDetector: ObservableObject {
             }
             .store(in: &settingsCancellables)
 
+        // Mute the mic path while the phone is talking.
+        announcer.onSpeakingChanged = { [weak self] speaking in
+            self?.setSpeechMute(speaking)
+        }
+
         // Passthrough toggle + hearing-ear changes both flow into the
         // passthrough mixer's pan + enabled state.
         Publishers.CombineLatest(settings.$passthroughEnabled, settings.$hearingEar)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] enabled, ear in
+                guard let self, self.isRunning else { return }
+                self.passthroughMixer.setEnabled(enabled, pan: ear.pan)
+            }
+            .store(in: &settingsCancellables)
+
+        // A calibrated ILD gain applies immediately to the live estimators.
+        settings.$ildGain
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] gain in
                 guard let self else { return }
-                let pan: Float
-                switch ear {
-                case .left:  pan = -1.0
-                case .right: pan =  1.0
-                case .unspecified: pan = 0
-                }
-                if self.isRunning {
-                    self.passthroughMixer.setEnabled(enabled, pan: pan)
-                }
+                let effective = gain ?? DirectionEstimator.defaultIldGain
+                self.estimator?.ildGain = effective
+                self.subband?.setIldGain(effective)
+            }
+            .store(in: &settingsCancellables)
+
+        // Switching the ILD measurement band needs new filters, so the
+        // estimators are rebuilt behind a tap reinstall.
+        settings.$ildHighBand
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, self.isRunning else { return }
+                self.restartCapture(reason: "ILD band changed")
             }
             .store(in: &settingsCancellables)
 
@@ -175,8 +215,6 @@ final class AudioDirectionDetector: ObservableObject {
 
         // Route changes (headset plugged in/out, CarPlay, AirPlay) can
         // swap our capture format from stereo to mono out from under us.
-        // React by tearing down and re-installing the tap so the DSP
-        // buffers pick up the new format.
         routeChangeObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification,
             object: session,
@@ -210,7 +248,8 @@ final class AudioDirectionDetector: ObservableObject {
                 defer { self.isStarting = false }
 
                 guard granted else {
-                    self.lastError = "Microphone access was denied. Enable it in Settings to use SoundCompass."
+                    self.lastError = String(localized: "Microphone access was denied. Enable it in Settings to use SoundCompass.")
+                    self.isPermissionDenied = true
                     return
                 }
                 do {
@@ -218,30 +257,44 @@ final class AudioDirectionDetector: ObservableObject {
                     try self.installTap()
                     try self.engine.start()
                     DSPDiagnostics.shared.begin(
-                        config:
-                            "source=\(self.activeSourceDescription) sign=\(self.directionSign) " +
-                            "sessionChannels=\(self.session.inputNumberOfChannels) " +
-                            "sampleRate=\(self.session.sampleRate) " +
-                            "engineFormat=\(self.engine.inputNode.inputFormat(forBus: 0).channelCount)ch",
+                        config: self.diagnosticsConfigLine(),
                         enabled: self.settings.showDebugStats
                     )
+                    self.smoother.reset()
+                    self.hazardGate.reset()
                     self.isRunning = true
                     self.lastError = nil
+                    self.isPermissionDenied = false
                     self.sessionStats.begin()
                     self.frontBackResolver.start()
-                    let pan: Float
-                    switch self.settings.hearingEar {
-                    case .left:  pan = -1.0
-                    case .right: pan =  1.0
-                    case .unspecified: pan = 0
-                    }
-                    self.passthroughMixer.setEnabled(self.settings.passthroughEnabled, pan: pan)
+                    self.passthroughMixer.setEnabled(self.settings.passthroughEnabled, pan: self.settings.hearingEar.pan)
                     self.liveActivity.start()
                 } catch {
-                    self.lastError = "Could not start audio: \(error.localizedDescription)"
+                    self.lastError = String(localized: "Could not start audio: \(error.localizedDescription)")
+                    self.isPermissionDenied = false
                 }
             }
         }
+    }
+
+    /// One-line description of the capture setup for the trace header.
+    private func diagnosticsConfigLine() -> String {
+        let engineChannels = engine.inputNode.inputFormat(forBus: 0).channelCount
+        let gain = estimator?.ildGain ?? 0
+        var band = "broadband"
+        if let range = estimator?.ildBandHz {
+            band = "\(range.lowerBound)-\(range.upperBound)"
+        }
+        let parts: [String] = [
+            "source=\(activeSourceDescription)",
+            "sign=\(directionSign)",
+            "sessionChannels=\(session.inputNumberOfChannels)",
+            "sampleRate=\(session.sampleRate)",
+            "engineFormat=\(engineChannels)ch",
+            "ildGain=\(gain)",
+            "ildBand=\(band)",
+        ]
+        return parts.joined(separator: " ")
     }
 
     func stop() {
@@ -251,9 +304,7 @@ final class AudioDirectionDetector: ObservableObject {
     }
 
     /// Shared teardown for every path that ends a capture session: user
-    /// stop, interruption `.began`, and a failed route-change restart.
-    /// Divergent partial copies of this list previously left the Live
-    /// Activity, session stats, and diagnostics running after interruptions.
+    /// stop, interruption `.began`, and a failed restart.
     private func teardown() {
         passthroughMixer.pause()
         engine.inputNode.removeTap(onBus: 0)
@@ -264,8 +315,52 @@ final class AudioDirectionDetector: ObservableObject {
         liveActivity.stop()
         sessionStats.end()
         subband?.reset()
+        estimator?.reset()
         DSPDiagnostics.shared.end()
         isRunning = false
+        isHazardActive = false
+        hazardLabel = nil
+    }
+
+    /// Reinstall the tap against the current session state without
+    /// ending the session (used for route changes and DSP reconfiguration).
+    private func restartCapture(reason: String) {
+        Log.lifecycle.info("Restarting capture: \(reason, privacy: .public)")
+        do {
+            passthroughMixer.pause()
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+            try configureSession()
+            try installTap()
+            try engine.start()
+            passthroughMixer.handleRouteChange()
+        } catch {
+            lastError = String(localized: "Audio route changed and could not be restarted: \(error.localizedDescription)")
+            isPermissionDenied = false
+            teardown()
+        }
+    }
+
+    // MARK: - Self-excitation gating
+
+    /// Ignore microphone input until `duration` from now. Used by the UI
+    /// after firing a haptic so the Taptic Engine's thump does not read
+    /// as a low-band sound.
+    func muteInput(for duration: TimeInterval) {
+        let until = Date().addingTimeInterval(duration)
+        muteUntil.withLock { current in
+            if until > current { current = until }
+        }
+    }
+
+    private func setSpeechMute(_ speaking: Bool) {
+        if speaking {
+            muteUntil.withLock { $0 = .distantFuture }
+        } else {
+            // Short tail for the room's reverberation of the callout.
+            let until = Date().addingTimeInterval(0.3)
+            muteUntil.withLock { $0 = until }
+        }
     }
 
     // MARK: - Interruptions
@@ -338,23 +433,22 @@ final class AudioDirectionDetector: ObservableObject {
             return
         }
 
-        // Only re-configure on route changes that actually change the
-        // input capabilities. `.categoryChange` / `.override` don't.
         switch reason {
         case .newDeviceAvailable, .oldDeviceUnavailable, .routeConfigurationChange:
             guard isRunning else { return }
-            do {
-                passthroughMixer.pause()
-                engine.inputNode.removeTap(onBus: 0)
-                engine.stop()
-                try configureSession()
-                try installTap()
-                try engine.start()
-                // Re-check whether the new route supports CROS.
+            // Only reinstall the tap when the *input* actually changed.
+            // `configureSession()` itself (data source, polar pattern,
+            // orientation) posts route-change notifications, and a naive
+            // restart-on-every-notification turns into a restart storm.
+            // Output-only changes (headphones in/out) matter only to the
+            // passthrough mixer.
+            let previous = (userInfo[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription)
+                .map(AudioSessionConfigurator.inputSignature(of:))
+            let current = AudioSessionConfigurator.inputSignature(of: session.currentRoute)
+            if let previous, previous == current {
                 passthroughMixer.handleRouteChange()
-            } catch {
-                lastError = "Audio route changed and could not be restarted: \(error.localizedDescription)"
-                teardown()
+            } else {
+                restartCapture(reason: "input route changed (\(reason.rawValue))")
             }
         default:
             break
@@ -364,64 +458,9 @@ final class AudioDirectionDetector: ObservableObject {
     // MARK: - Audio session + tap
 
     private func configureSession() throws {
-        try session.setCategory(
-            .playAndRecord,
-            mode: .default,
-            options: [.defaultToSpeaker]
-        )
-
-        // Prefer the built-in mic so we get the multi-element array.
-        if let builtIn = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
-            try session.setPreferredInput(builtIn)
-
-            Log.audio.info("Built-in mic: \(builtIn.portName, privacy: .public)")
-            Log.audio.info("Data sources: \(builtIn.dataSources?.count ?? 0)")
-
-            for source in builtIn.dataSources ?? [] {
-                let patterns = source.supportedPolarPatterns?.map(\.rawValue) ?? []
-                Log.audio.info("  Source: \(source.dataSourceName, privacy: .public) orientation: \(source.orientation?.rawValue ?? "nil", privacy: .public) patterns: \(patterns, privacy: .public)")
-            }
-
-            // iPhone "stereo" is a synthesized image and the FRONT and BACK
-            // data sources produce MIRRORED left/right relative to each
-            // other (WWDC20 session 10226). With the documented hold —
-            // phone flat, screen up, top edge pointing away — the BACK
-            // source's left/right match the user's left/right, so prefer
-            // it explicitly instead of taking whichever source happens to
-            // enumerate first. If only the front source supports stereo,
-            // use it and flip the sign of every direction estimate.
-            let stereoSources = (builtIn.dataSources ?? []).filter {
-                $0.supportedPolarPatterns?.contains(.stereo) == true
-            }
-            let chosen = stereoSources.first(where: { $0.orientation == .back })
-                ?? stereoSources.first
-
-            if let chosen {
-                try chosen.setPreferredPolarPattern(.stereo)
-                try builtIn.setPreferredDataSource(chosen)
-                let mirrored = chosen.orientation == .front
-                directionSign = mirrored ? -1.0 : 1.0
-                activeSourceDescription = "\(chosen.dataSourceName)\(mirrored ? " (mirrored)" : "")"
-                Log.audio.info("  → Selected \(chosen.dataSourceName, privacy: .public) for stereo, directionSign \(self.directionSign)")
-            } else {
-                directionSign = 1.0
-                activeSourceDescription = "no stereo source"
-                Log.audio.warning("No data source with stereo polar pattern found")
-            }
-        } else {
-            Log.audio.warning("No built-in mic found in available inputs")
-        }
-
-        // Ask for both channels explicitly — the polar pattern alone is a
-        // preference, not a guarantee. Best-effort: throws if the route
-        // can't do 2 channels, which the mono path already handles.
-        try? session.setPreferredInputNumberOfChannels(2)
-
-        try session.setPreferredInputOrientation(.portrait)
-        try session.setActive(true, options: [])
-
-        // Log what the session actually gave us after activation.
-        Log.audio.info("Session active — input channels: \(self.session.inputNumberOfChannels), sample rate: \(self.session.sampleRate)")
+        let selection = try AudioSessionConfigurator.configureForStereoCapture(session)
+        directionSign = selection.directionSign
+        activeSourceDescription = selection.description
     }
 
     private func installTap() throws {
@@ -429,19 +468,36 @@ final class AudioDirectionDetector: ObservableObject {
         let format = input.inputFormat(forBus: 0)
         let channels = Int(format.channelCount)
         Log.audio.info("Engine input format: \(channels) ch, \(format.sampleRate) Hz, \(format.commonFormat.rawValue)")
+
+        // A 0 Hz / 0-channel format (permission race, some CarPlay and
+        // Simulator routes) makes `installTap` and `SNAudioStreamAnalyzer`
+        // raise Objective-C exceptions that Swift cannot catch. Refuse it
+        // here with a real error instead of crashing.
+        guard format.sampleRate > 0, channels > 0 else {
+            throw NSError(
+                domain: "SoundCompass.AudioDirectionDetector",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey:
+                    String(localized: "The microphone did not report a usable audio format. Try again.")]
+            )
+        }
         isMono = channels < 2
 
         // Size-check and allocate DSP. GCC-PHAT buffers are allocated once.
         let sampleRate = format.sampleRate
+        let gain = settings.ildGain ?? DirectionEstimator.defaultIldGain
         let estimator = DirectionEstimator(
             sampleRate: sampleRate,
-            frameCount: Int(bufferFrames)
+            frameCount: Int(bufferFrames),
+            ildGain: gain,
+            ildBandHz: settings.ildHighBand ? SettingsStore.highBandILDRange : nil
         )
         let subband = SubbandDirectionEstimator(
             sampleRate: sampleRate,
             frameCount: Int(bufferFrames),
             bands: SubbandDirectionEstimator.defaultBands()
         )
+        subband.setIldGain(gain)
         self.estimator = estimator
         self.subband = subband
         loggedMonoDiagnostic = false
@@ -462,14 +518,20 @@ final class AudioDirectionDetector: ObservableObject {
         guard frames > 0 else { return }
         let channels = Int(buffer.format.channelCount)
 
-        // Classification is always best-effort and runs async on its own queue.
-        classifier.analyze(buffer: buffer, at: time)
+        let muted = Date() < muteUntil.withLock { $0 }
 
-        // Mono path — no direction possible, just publish loudness.
-        if channels < 2 {
-            // Edge-triggered: one marker per tap install, not one per frame —
-            // the tap thread must stay free of per-frame allocations.
-            if !loggedMonoDiagnostic {
+        // Classification is always best-effort and runs async on its own
+        // queue — but not while the phone is the one making the sound.
+        if !muted {
+            classifier.analyze(buffer: buffer, at: time)
+        }
+
+        // Mono or muted: no direction possible, just publish loudness.
+        if channels < 2 || muted {
+            if channels < 2, !loggedMonoDiagnostic {
+                // Edge-triggered: one marker per tap install, not one per
+                // frame — the tap thread should stay free of per-frame
+                // string building.
                 loggedMonoDiagnostic = true
                 DSPDiagnostics.shared.note("MONO input (\(channels)ch) — direction impossible")
             }
@@ -478,8 +540,8 @@ final class AudioDirectionDetector: ObservableObject {
             let loudness = Double(min(rms * 8, 1.0))
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                self.magnitude = self.magnitude * 0.6 + loudness * 0.4
-                self.direction *= 0.9
+                self.smoother.updateLoudnessOnly(loudness, magnitudeBlend: self.settings.sensitivity.magnitudeBlend)
+                self.publishSmoothed()
             }
             return
         }
@@ -488,18 +550,44 @@ final class AudioDirectionDetector: ObservableObject {
 
         let left = channelData[0]
         let right = channelData[1]
-
-        // The estimators see raw channels; un-mirror front-source capture
-        // here so every consumer downstream gets user-space left/right.
         let sign = directionSign
-        var broadband = estimator.estimate(left: left, right: right, frameCount: frames)
-        broadband.direction *= sign
-        let bands = subband.estimate(left: left, right: right, frameCount: frames).map {
-            SubbandDirectionEstimator.BandResult(
-                band: $0.band,
-                direction: $0.direction * sign,
-                magnitude: $0.magnitude
-            )
+        let chunk = Int(bufferFrames)
+
+        // The estimators are sized for `bufferFrames`, and installTap's
+        // bufferSize is only a hint: devices routinely deliver larger
+        // buffers. Walk the buffer in chunks so every frame is analysed
+        // (the streaming band filters need the continuity anyway) and
+        // combine the chunk estimates: direction weighted by energy,
+        // loudness as the peak.
+        var weightedDirection = 0.0
+        var weight = 0.0
+        var peakLoudness = 0.0
+        var peakRms = 0.0
+        var latest = DirectionEstimate(direction: 0, magnitude: 0, combinedRms: 0, isConfident: false)
+        var bands: [SubbandDirectionEstimator.BandResult] = []
+        var offset = 0
+        while offset < frames {
+            let n = min(chunk, frames - offset)
+            var chunkEstimate = estimator.estimate(left: left + offset, right: right + offset, frameCount: n)
+            chunkEstimate.direction *= sign
+            bands = subband.estimate(left: left + offset, right: right + offset, frameCount: n, directionSign: sign)
+            if chunkEstimate.isConfident {
+                let w = chunkEstimate.combinedRms * Double(n)
+                weightedDirection += chunkEstimate.direction * w
+                weight += w
+            }
+            peakLoudness = max(peakLoudness, chunkEstimate.magnitude)
+            peakRms = max(peakRms, chunkEstimate.combinedRms)
+            latest = chunkEstimate
+            offset += n
+        }
+
+        var broadband = latest
+        broadband.magnitude = peakLoudness
+        broadband.combinedRms = peakRms
+        if weight > 0 {
+            broadband.direction = weightedDirection / weight
+            broadband.isConfident = true
         }
 
         // Pick the loudest band as the current focus.
@@ -507,112 +595,132 @@ final class AudioDirectionDetector: ObservableObject {
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-
-            let baseBlend = self.settings.sensitivity.directionBlend
-            let magBlend = self.settings.sensitivity.magnitudeBlend
-
-            // Hazard override: if the classifier has flagged a safety-
-            // critical sound and the setting is on, skip the usual
-            // exponential smoother so the arrow lands on the true
-            // direction immediately.
-            let rawId = self.classifier.topRawIdentifier
-            let hazard = self.settings.hazardAlerts && HazardClassifier.isHazard(identifier: rawId)
-            let dirBlend = hazard ? 0.9 : baseBlend
-
-            if broadband.isConfident {
-                self.direction = self.direction * (1 - dirBlend) + broadband.direction * dirBlend
-            } else {
-                self.direction *= 0.9
-            }
-            self.magnitude = self.magnitude * (1 - magBlend) + broadband.magnitude * magBlend
-            if self.settings.showDebugStats {
-                DSPDiagnostics.shared.append(
-                    estimate: broadband,
-                    smoothDir: self.direction,
-                    magnitude: self.magnitude
-                )
-            }
-            self.bandResults = bands
-            self.dominantBandName = dominant?.band.name
-            self.debugDSP = self.settings.showDebugStats
-                ? String(format: "src=%@ ILD=%.4f ITD=%.4f lag=%d conf=%.2f L=%.4f R=%.4f dir=%.3f",
-                    self.activeSourceDescription,
-                    broadband.rawILD, broadband.rawITD, broadband.lagSamples, broadband.itdConfidence,
-                    broadband.leftRms, broadband.rightRms, broadband.direction)
-                : ""
-
-            if hazard {
-                let friendly = rawId.map(HazardClassifier.friendlyLabel) ?? "Hazard"
-                if !self.isHazardActive {
-                    Log.hazard.warning("Hazard detected: \(friendly, privacy: .public) at direction \(self.direction)")
-                    // Edge-triggered: record the entry only on rising edge.
-                    self.eventHistory.record(
-                        label: friendly,
-                        rawIdentifier: rawId,
-                        direction: self.direction,
-                        magnitude: self.magnitude,
-                        isHazard: true
-                    )
-                    self.sessionStats.record(label: friendly, direction: self.direction, isHazard: true)
-                    // Background fallback: also post a local notification
-                    // so the user knows about the hazard even when the
-                    // SoundCompass screen is covered.
-                    if self.sceneInBackground {
-                        self.hazardNotifier.post(
-                            label: friendly,
-                            direction: self.direction,
-                            allowed: self.settings.hazardAlerts
-                        )
-                    }
-                }
-                self.isHazardActive = true
-                self.hazardLabel = friendly
-            } else if self.isHazardActive && broadband.magnitude < 0.15 {
-                // Decay hazard banner once the sound fades.
-                self.isHazardActive = false
-                self.hazardLabel = nil
-            }
-
-            // Also log non-hazard label transitions so the history has
-            // context around each hazard ("car horn followed by speech").
-            if let label = self.classifier.topLabel,
-               !hazard,
-               self.eventHistory.events.first?.rawIdentifier != rawId {
-                self.eventHistory.record(
-                    label: label,
-                    rawIdentifier: rawId,
-                    direction: self.direction,
-                    magnitude: self.magnitude,
-                    isHazard: false
-                )
-                self.sessionStats.record(label: label, direction: self.direction, isHazard: false)
-            }
-
-            // Feed the motion-based resolver so it can pair this direction
-            // sample with the current cumulative yaw.
-            if broadband.isConfident {
-                self.frontBackResolver.recordDirection(self.direction)
-            }
-
-            // Fan-out to the speech announcer, the watch mirror, and the
-            // Live Activity on the Lock Screen / Dynamic Island.
-            let label = self.classifier.topLabel
-            self.announcer.announce(
-                direction: self.direction,
-                magnitude: self.magnitude,
-                label: label
-            )
-            self.watchSession.send(
-                direction: self.direction,
-                magnitude: self.magnitude,
-                label: label
-            )
-            self.liveActivity.update(
-                direction: self.direction,
-                magnitude: self.magnitude,
-                label: DirectionLabel.label(for: self.direction),
-                classifierLabel: label
-            )
+            self.consume(broadband: broadband, bands: bands, dominant: dominant)
         }
+    }
+
+    /// Main-thread half of the per-buffer update: smoothing, hazard state,
+    /// history, and fan-out.
+    private func consume(
+        broadband: DirectionEstimate,
+        bands: [SubbandDirectionEstimator.BandResult],
+        dominant: SubbandDirectionEstimator.BandResult?
+    ) {
+        classifier.expireStaleLabel()
+        let rawId = classifier.topRawIdentifier
+        let hazardSound = settings.hazardAlerts && HazardClassifier.isHazard(identifier: rawId)
+
+        // Hazard override: if the classifier has flagged a safety-critical
+        // sound and the setting is on, nearly skip the exponential
+        // smoother so the arrow lands on the true direction immediately.
+        let dirBlend = hazardSound ? 0.9 : settings.sensitivity.directionBlend
+        smoother.update(
+            estimate: broadband,
+            directionBlend: dirBlend,
+            magnitudeBlend: settings.sensitivity.magnitudeBlend
+        )
+        publishSmoothed()
+
+        bandResults = bands
+        dominantBandName = dominant?.band.name
+
+        if settings.showDebugStats {
+            let bandSummary = bands
+                .map { String(format: "%@:%.4f", $0.band.name, $0.rawILD) }
+                .joined(separator: "|")
+            DSPDiagnostics.shared.append(
+                estimate: broadband,
+                smoothDir: direction,
+                magnitude: magnitude,
+                bandILD: bandSummary
+            )
+            debugDSP = String(
+                format: "src=%@ ILD=%.4f ITD=%.4f lag=%d conf=%.2f L=%.4f R=%.4f iL=%.4f iR=%.4f dir=%.3f",
+                activeSourceDescription,
+                broadband.rawILD, broadband.rawITD, broadband.lagSamples, broadband.itdConfidence,
+                broadband.leftRms, broadband.rightRms, broadband.ildLeftRms, broadband.ildRightRms,
+                broadband.direction
+            )
+        } else if !debugDSP.isEmpty {
+            debugDSP = ""
+        }
+
+        switch hazardGate.update(isHazardSound: hazardSound, magnitude: broadband.magnitude) {
+        case .began:
+            let friendly = rawId.map(HazardClassifier.friendlyLabel) ?? String(localized: "Hazard")
+            Log.hazard.warning("Hazard detected: \(friendly, privacy: .public) at direction \(self.direction)")
+            eventHistory.record(
+                label: friendly,
+                rawIdentifier: rawId,
+                direction: direction,
+                magnitude: magnitude,
+                isHazard: true
+            )
+            sessionStats.record(label: friendly, direction: direction, isHazard: true)
+            // Background fallback: also post a local notification so the
+            // user knows about the hazard even when the SoundCompass
+            // screen is covered.
+            if sceneInBackground {
+                hazardNotifier.post(
+                    label: friendly,
+                    direction: direction,
+                    allowed: settings.hazardAlerts
+                )
+            }
+            isHazardActive = true
+            hazardLabel = friendly
+        case .ended:
+            isHazardActive = false
+            hazardLabel = nil
+        case .none:
+            break
+        }
+
+        // Also log non-hazard label transitions so the history has
+        // context around each hazard ("car horn followed by speech").
+        if let label = classifier.topLabel,
+           !hazardSound,
+           eventHistory.events.first?.rawIdentifier != rawId {
+            eventHistory.record(
+                label: label,
+                rawIdentifier: rawId,
+                direction: direction,
+                magnitude: magnitude,
+                isHazard: false
+            )
+            sessionStats.record(label: label, direction: direction, isHazard: false)
+        }
+
+        // Feed the motion-based resolver so it can pair this direction
+        // sample with the current cumulative yaw.
+        if broadband.isConfident {
+            frontBackResolver.recordDirection(direction)
+        }
+
+        // Fan-out to the speech announcer, the watch mirror, and the
+        // Live Activity on the Lock Screen / Dynamic Island.
+        let label = classifier.topLabel
+        announcer.announce(
+            direction: direction,
+            magnitude: magnitude,
+            label: label
+        )
+        watchSession.send(
+            direction: direction,
+            magnitude: magnitude,
+            label: label,
+            isHazard: isHazardActive
+        )
+        liveActivity.update(
+            direction: direction,
+            magnitude: magnitude,
+            label: DirectionLabel.label(for: direction),
+            classifierLabel: label
+        )
+    }
+
+    private func publishSmoothed() {
+        direction = smoother.direction
+        magnitude = smoother.magnitude
     }
 }

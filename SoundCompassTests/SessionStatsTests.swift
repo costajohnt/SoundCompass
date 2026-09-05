@@ -3,6 +3,11 @@ import XCTest
 
 final class SessionStatsTests: XCTestCase {
 
+    private final class Clock {
+        var now = Date(timeIntervalSince1970: 1_000)
+        func advance(_ seconds: TimeInterval) { now = now.addingTimeInterval(seconds) }
+    }
+
     func testBeginResetsCounters() {
         let stats = SessionStats()
         stats.begin()
@@ -42,24 +47,25 @@ final class SessionStatsTests: XCTestCase {
         stats.record(label: "B", direction: 0.85, isHazard: false)
         stats.record(label: "C", direction: -0.7, isHazard: false)
         // Two "Far right" events dominate.
-        XCTAssertEqual(stats.snapshot.topDirectionBucket, "Far right")
+        XCTAssertEqual(stats.snapshot.topDirectionBucket, DirectionLabel.label(for: 0.8))
     }
 
     func testDurationTicksWhileRunning() {
-        let stats = SessionStats()
+        let clock = Clock()
+        let stats = SessionStats(now: { clock.now })
         stats.begin()
-        usleep(50_000)
-        XCTAssertGreaterThan(stats.snapshot.duration, 0)
+        clock.advance(5)
+        XCTAssertEqual(stats.snapshot.elapsed(at: clock.now), 5, accuracy: 1e-9)
     }
 
     func testEndFreezesDuration() {
-        let stats = SessionStats()
+        let clock = Clock()
+        let stats = SessionStats(now: { clock.now })
         stats.begin()
-        usleep(20_000)
+        clock.advance(2)
         stats.end()
-        let frozen = stats.snapshot.duration
-        usleep(20_000)
-        XCTAssertEqual(stats.snapshot.duration, frozen, accuracy: 0.01)
+        clock.advance(10)
+        XCTAssertEqual(stats.snapshot.elapsed(at: clock.now), 2, accuracy: 1e-9)
     }
 
     func testCSVEmitsHeaderAndRows() {

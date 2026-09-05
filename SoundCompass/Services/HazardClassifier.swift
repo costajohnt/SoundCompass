@@ -1,49 +1,79 @@
 import Foundation
 
-/// A lightweight lookup over Apple's built-in `SNClassifySoundRequest`
-/// identifiers. Some sounds are *safety critical* — sirens, alarms,
-/// reversing beeps — and the app should react to those immediately
-/// (bypassing the usual exponential smoother) and escalate the feedback
-/// (louder haptic, spoken alert that doesn't obey the normal
-/// rate-limit). Everything else gets the normal path.
+/// A lookup over Apple's built-in `SNClassifySoundRequest` identifiers.
+/// Some sounds are *safety critical* — sirens, alarms, horns, reversing
+/// beeps — and the app should react to those immediately (bypassing the
+/// usual exponential smoother) and escalate the feedback. Everything
+/// else gets the normal path.
 ///
-/// `isHazard(identifier:)` is a pure function so it's trivial to unit
-/// test and to expand as we learn which classifier labels the user
-/// community actually encounters.
+/// Matching is two-layered:
+///
+/// 1. A curated set of exact `version1` identifiers.
+/// 2. Keyword rules over the identifier, so the many specific classes
+///    Apple ships (`police_siren`, `ambulance_siren`, `car_alarm`, …)
+///    are caught without listing every one, and so a renamed identifier
+///    in a future model version does not silently drop a hazard.
+///
+/// `HazardClassifierTests` validates the curated set against
+/// `SNClassifySoundRequest.knownClassifications` on the simulator, so an
+/// identifier that Apple does not actually emit fails CI instead of
+/// sitting dead in the list.
 enum HazardClassifier {
 
-    /// Identifiers that should trigger the hazard path. These are the
-    /// raw strings emitted by `.version1` — underscores not spaces.
+    /// Exact `version1` identifiers that should trigger the hazard path.
     static let hazardIdentifiers: Set<String> = [
         "siren",
+        "civil_defense_siren",
+        "police_siren",
+        "ambulance_siren",
+        "fire_engine_siren",
         "emergency_vehicle",
-        "fire_alarm",
-        "smoke_detector_fire_alarm",
-        "smoke_alarm",
-        "carbon_monoxide_detector",
-        "vehicle_horn_car_horn_honking",
-        "vehicle_horn",
         "car_horn",
-        "truck_horn",
-        "train_horn",
         "air_horn",
-        "alarm",
+        "train_horn",
         "alarm_clock",
+        "smoke_detector",
+        "fire_alarm",
+        "car_alarm",
         "doorbell",
         "glass_breaking",
-        "explosion",
         "gunshot_gunfire",
+        "explosion",
+        "reversing_beeps",
+    ]
+
+    /// Substrings that mark an identifier as a hazard.
+    static let hazardKeywords: [String] = [
+        "siren",
+        "alarm",
+        "horn",
         "gunshot",
-        "backing_up_beep",
-        "reversing_beep",
-        "police_car_siren",
+        "gunfire",
+        "explosion",
+        "glass_break",
+        "reversing",
+        "backing_up",
+        "smoke_detector",
+        "emergency",
+    ]
+
+    /// Identifiers that contain a keyword but are not hazards — musical
+    /// instruments, mostly.
+    static let keywordExclusions: Set<String> = [
+        "french_horn",
+        "english_horn",
+        "horn_section",
+        "shofar",
     ]
 
     /// Returns `true` when the classifier identifier matches a known
     /// hazard sound.
     static func isHazard(identifier: String?) -> Bool {
         guard let identifier, !identifier.isEmpty else { return false }
-        return hazardIdentifiers.contains(identifier.lowercased())
+        let id = identifier.lowercased()
+        if hazardIdentifiers.contains(id) { return true }
+        if keywordExclusions.contains(id) { return false }
+        return hazardKeywords.contains { id.contains($0) }
     }
 
     /// A friendly label for the banner.

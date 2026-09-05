@@ -37,4 +37,15 @@ final class DirectionUpdateTests: XCTestCase {
         XCTAssertNil(DirectionUpdate(dictionary: ["direction": 0.0]))
         XCTAssertNil(DirectionUpdate(dictionary: ["direction": 0.0, "magnitude": 0.0]))
     }
+
+    func testHazardFlagRoundTripsAndDefaultsToFalse() {
+        let hazard = DirectionUpdate(direction: 0.1, magnitude: 0.9, label: "Siren", isHazard: true)
+        let dict = hazard.toDictionary()
+        XCTAssertEqual(dict["hazard"] as? Bool, true)
+        XCTAssertEqual(DirectionUpdate(dictionary: dict)?.isHazard, true)
+
+        let calm = DirectionUpdate(direction: 0.1, magnitude: 0.9, label: nil)
+        XCTAssertNil(calm.toDictionary()["hazard"], "older watch builds must not see an unknown key")
+        XCTAssertEqual(DirectionUpdate(dictionary: calm.toDictionary())?.isHazard, false)
+    }
 }

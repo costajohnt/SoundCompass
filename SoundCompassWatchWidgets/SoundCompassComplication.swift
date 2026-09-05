@@ -3,8 +3,10 @@ import WidgetKit
 
 /// A glanceable watch face complication that shows the last direction we
 /// heard through the WatchConnectivity bridge. The watchOS app persists
-/// its last direction in a shared App Group-less UserDefaults key and the
-/// complication re-reads it on each timeline refresh.
+/// its last direction in the App Group `UserDefaults` suite
+/// (`SharedDefaults.store`) and the complication re-reads it on each
+/// timeline refresh. A plain `UserDefaults.standard` would not work: the
+/// extension has its own container.
 ///
 /// The complication is intentionally light on work: it is not wired to
 /// its own CoreMotion or microphone, just to a cached direction value
@@ -45,15 +47,15 @@ struct ComplicationProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<ComplicationEntry>) -> Void) {
         let entry = currentEntry()
-        // Refresh every 60 s; the WatchConnectivity bridge writes a
-        // defaults key in SoundCompassComplicationDefaults.swift and
-        // we pick it up on the next timeline refresh.
-        let next = Calendar.current.date(byAdding: .second, value: 60, to: entry.date) ?? entry.date
+        // The bridge asks WidgetKit to reload when there is something
+        // new (throttled to respect the daily budget); the timeline only
+        // needs a slow safety refresh on top of that.
+        let next = Calendar.current.date(byAdding: .minute, value: 15, to: entry.date) ?? entry.date
         completion(Timeline(entries: [entry], policy: .after(next)))
     }
 
     private func currentEntry() -> ComplicationEntry {
-        let direction = UserDefaults.standard.double(forKey: "soundcompass.watch.lastDirection")
+        let direction = SharedDefaults.store.double(forKey: SharedDefaults.lastDirectionKey)
         return ComplicationEntry(
             date: Date(),
             direction: direction,

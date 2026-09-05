@@ -2,13 +2,19 @@ import Charts
 import SwiftUI
 
 /// Calibration screen surfaced from the Settings sheet. Records five
-/// seconds of stereo audio, runs it through the offline DSP pipeline,
-/// and renders the resulting direction trace as a line chart so users
-/// (or contributors) can see how the app sees a known sound without
-/// having to stare at the live compass.
+/// seconds of stereo audio, runs it through the offline DSP pipeline with
+/// the *current* settings (gain, ILD band, sensitivity), and renders the
+/// resulting direction trace as a line chart.
+///
+/// It is also the place where the per-device ILD gain gets set: record a
+/// sound held hard to one side, tap **Use as calibration**, and the 90th
+/// percentile of the measured level difference becomes this phone's
+/// full-scale deflection.
 struct CalibrationView: View {
+    @EnvironmentObject private var settings: SettingsStore
     @StateObject private var recorder = CalibrationRecorder()
     @State private var samples: [CalibrationSample] = []
+    @State private var suggestedGain: Double?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -22,6 +28,7 @@ struct CalibrationView: View {
                     if !samples.isEmpty {
                         chart
                         summary
+                        calibrationCard
                     }
 
                     controls
@@ -38,12 +45,30 @@ struct CalibrationView: View {
             }
         }
         .onChange(of: recorder.clip) { _, newClip in
-            guard let clip = newClip else {
-                samples = []
-                return
-            }
-            samples = CalibrationProcessor.process(clip: clip)
+            reprocess(clip: newClip)
         }
+        .onChange(of: settings.ildHighBand) { _, _ in
+            reprocess(clip: recorder.clip)
+        }
+        .onChange(of: settings.ildGain) { _, _ in
+            reprocess(clip: recorder.clip)
+        }
+    }
+
+    private func reprocess(clip: CalibrationClip?) {
+        guard let clip else {
+            samples = []
+            suggestedGain = nil
+            return
+        }
+        samples = CalibrationProcessor.process(
+            clip: clip,
+            ildGain: settings.ildGain ?? DirectionEstimator.defaultIldGain,
+            ildBandHz: settings.ildHighBand ? SettingsStore.highBandILDRange : nil,
+            directionBlend: settings.sensitivity.directionBlend,
+            magnitudeBlend: settings.sensitivity.magnitudeBlend
+        )
+        suggestedGain = CalibrationProcessor.suggestedIldGain(from: samples)
     }
 
     // MARK: - Sections
@@ -61,15 +86,15 @@ struct CalibrationView: View {
     }
 
     private var stateCard: some View {
-        let (icon, title, detail, tint) = stateCopy()
+        let copy = stateCopy()
         return HStack(alignment: .top, spacing: 12) {
-            Image(systemName: icon)
+            Image(systemName: copy.icon)
                 .font(.title3)
-                .foregroundStyle(tint)
+                .foregroundStyle(copy.tint)
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline)
-                Text(detail)
+                Text(copy.title).font(.headline)
+                copy.detail
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -77,10 +102,10 @@ struct CalibrationView: View {
             Spacer(minLength: 0)
         }
         .padding(14)
-        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .background(copy.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(tint.opacity(0.25), lineWidth: 1)
+                .stroke(copy.tint.opacity(0.25), lineWidth: 1)
         )
     }
 
@@ -110,7 +135,7 @@ struct CalibrationView: View {
                 AxisMarks(position: .leading, values: [-1, -0.5, 0, 0.5, 1]) { value in
                     AxisValueLabel {
                         if let d = value.as(Double.self) {
-                            Text(labelForAxis(d))
+                            Text(verbatim: labelForAxis(d))
                                 .font(.caption2)
                         }
                     }
@@ -131,6 +156,8 @@ struct CalibrationView: View {
     private var summary: some View {
         let maxMagnitude = samples.map(\.magnitude).max() ?? 0
         let avgDirection = samples.map(\.direction).reduce(0, +) / Double(max(samples.count, 1))
+        let confident = samples.filter(\.isConfident).map { abs($0.rawILD) }
+        let peakILD = confident.max() ?? 0
         return VStack(alignment: .leading, spacing: 4) {
             Text("Summary")
                 .font(.caption.weight(.semibold))
@@ -138,17 +165,46 @@ struct CalibrationView: View {
             HStack(spacing: 16) {
                 summaryCell(label: "Peak loudness", value: String(format: "%.0f%%", maxMagnitude * 100))
                 summaryCell(label: "Average direction", value: DirectionLabel.label(for: avgDirection))
-                summaryCell(label: "Samples", value: "\(samples.count)")
+                summaryCell(label: "Peak |ILD|", value: String(format: "%.3f", peakILD))
             }
         }
     }
 
-    private func summaryCell(label: String, value: String) -> some View {
+    /// Turns the recording into a stored per-device gain.
+    private var calibrationCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Use as calibration")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if let suggestedGain {
+                Text("If this recording was a sound held hard to one side at about a metre, storing it sets this phone's full-scale level difference. Suggested ILD gain: \(suggestedGain, specifier: "%.1f") (current \(settings.ildGain ?? DirectionEstimator.defaultIldGain, specifier: "%.1f")).")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    settings.ildGain = suggestedGain
+                } label: {
+                    Label("Store as this device's ILD gain", systemImage: "scope")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.cyan)
+            } else {
+                Text("Not enough confident windows in this recording to derive a gain. Record again with a louder, sustained sound held to one side.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func summaryCell(label: LocalizedStringKey, value: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(label)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            Text(value)
+            Text(verbatim: value)
                 .font(.subheadline.weight(.medium))
         }
     }
@@ -178,35 +234,42 @@ struct CalibrationView: View {
 
     // MARK: - Helpers
 
-    private func stateCopy() -> (String, String, String, Color) {
+    private struct StateCopy {
+        let icon: String
+        let title: LocalizedStringKey
+        let detail: Text
+        let tint: Color
+    }
+
+    private func stateCopy() -> StateCopy {
         switch recorder.state {
         case .idle:
-            return (
-                "record.circle",
-                "Ready",
-                "Tap Record to capture five seconds of stereo audio.",
-                .cyan
+            return StateCopy(
+                icon: "record.circle",
+                title: "Ready",
+                detail: Text("Tap Record to capture five seconds of stereo audio."),
+                tint: .cyan
             )
         case .recording(let remaining):
-            return (
-                "waveform",
-                "Recording…",
-                String(format: "%.1fs remaining", remaining),
-                .orange
+            return StateCopy(
+                icon: "waveform",
+                title: "Recording…",
+                detail: Text("\(remaining, specifier: "%.1f")s remaining"),
+                tint: .orange
             )
         case .finished:
-            return (
-                "checkmark.circle.fill",
-                "Done",
-                "Run through the offline DSP; trace is below.",
-                .green
+            return StateCopy(
+                icon: "checkmark.circle.fill",
+                title: "Done",
+                detail: Text("Run through the offline DSP; trace is below."),
+                tint: .green
             )
         case .failed(let reason):
-            return (
-                "exclamationmark.triangle.fill",
-                "Failed",
-                reason,
-                .yellow
+            return StateCopy(
+                icon: "exclamationmark.triangle.fill",
+                title: "Failed",
+                detail: Text(verbatim: reason),
+                tint: .yellow
             )
         }
     }
@@ -224,4 +287,5 @@ struct CalibrationView: View {
 
 #Preview {
     CalibrationView()
+        .environmentObject(SettingsStore())
 }

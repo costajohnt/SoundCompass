@@ -10,6 +10,10 @@ struct CalibrationClip: Equatable {
     var left: [Float]
     var right: [Float]
     var sampleRate: Double
+    /// `-1` when the capture came from the mirrored (front) data source,
+    /// so the processor can put its trace in user space exactly like the
+    /// live detector does.
+    var directionSign: Double = 1
 
     var duration: TimeInterval {
         guard sampleRate > 0 else { return 0 }
@@ -46,6 +50,7 @@ final class CalibrationRecorder: ObservableObject {
     private var rightBuffer: [Float] = []
     private var countdownTimer: Timer?
     private var targetDuration: TimeInterval = 5.0
+    private var directionSign: Double = 1
 
     /// Start a capture of `duration` seconds. The clip is published on
     /// `self.clip` once it finishes.
@@ -61,17 +66,20 @@ final class CalibrationRecorder: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 guard granted else {
-                    self.state = .failed("Microphone access denied.")
+                    self.state = .failed(String(localized: "Microphone access denied."))
                     return
                 }
                 do {
-                    try self.configureSession()
+                    // Same configuration as the live detector, so the
+                    // trace is not mirrored relative to the compass.
+                    let selection = try AudioSessionConfigurator.configureForStereoCapture(self.session)
+                    self.directionSign = selection.directionSign
                     try self.installTap()
                     try self.engine.start()
                     self.state = .recording(remaining: duration)
                     self.startCountdown()
                 } catch {
-                    self.state = .failed("Could not start recording: \(error.localizedDescription)")
+                    self.state = .failed(String(localized: "Could not start recording: \(error.localizedDescription)"))
                 }
             }
         }
@@ -85,41 +93,37 @@ final class CalibrationRecorder: ObservableObject {
         state = .idle
     }
 
-    private func configureSession() throws {
-        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
-        if let builtIn = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
-            try session.setPreferredInput(builtIn)
-            if let stereoSource = builtIn.dataSources?.first(where: {
-                $0.supportedPolarPatterns?.contains(.stereo) ?? false
-            }) {
-                try stereoSource.setPreferredPolarPattern(.stereo)
-                try builtIn.setPreferredDataSource(stereoSource)
-            }
-        }
-        try session.setActive(true, options: [])
-    }
-
     private func installTap() throws {
         let input = engine.inputNode
         let format = input.inputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            throw NSError(
+                domain: "SoundCompass.CalibrationRecorder",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey:
+                    String(localized: "The microphone did not report a usable audio format. Try again.")]
+            )
+        }
         guard format.channelCount >= 2 else {
             throw NSError(
                 domain: "SoundCompass.CalibrationRecorder",
                 code: 1,
                 userInfo: [NSLocalizedDescriptionKey:
-                    "This input only provides mono audio. Disconnect any headset and try again."]
+                    String(localized: "This input only provides mono audio. Disconnect any headset and try again.")]
             )
         }
 
-        // Pre-allocate to avoid heap allocation on the real-time thread.
+        // Pre-allocate so the append queue does not grow the arrays
+        // incrementally.
         let capacity = Int(targetDuration * format.sampleRate) + 4096
         leftBuffer.reserveCapacity(capacity)
         rightBuffer.reserveCapacity(capacity)
 
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buffer, _ in
-            // Copy buffer data on a non-RT queue to avoid allocation on
-            // the audio thread and races with finish() on the main thread.
+            // The tap block runs on a non-real-time engine thread, so the
+            // two Array copies here are acceptable; appends are serialized
+            // on `appendQueue` so `finish()` can drain them safely.
             guard let self, let channelData = buffer.floatChannelData else { return }
             let frames = Int(buffer.frameLength)
             let left = Array(UnsafeBufferPointer(start: channelData[0], count: frames))
@@ -154,6 +158,7 @@ final class CalibrationRecorder: ObservableObject {
 
         let format = engine.inputNode.inputFormat(forBus: 0)
         let sampleRate = format.sampleRate > 0 ? format.sampleRate : 48_000
+        let sign = directionSign
 
         // Wait for any in-flight appends to drain before reading buffers.
         appendQueue.async { [weak self] in
@@ -161,7 +166,8 @@ final class CalibrationRecorder: ObservableObject {
             let clip = CalibrationClip(
                 left: self.leftBuffer,
                 right: self.rightBuffer,
-                sampleRate: sampleRate
+                sampleRate: sampleRate,
+                directionSign: sign
             )
             DispatchQueue.main.async {
                 self.clip = clip

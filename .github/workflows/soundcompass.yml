@@ -10,8 +10,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    name: Build and test
+  ios-test:
+    name: iOS build and test
     runs-on: macos-15
 
     steps:
@@ -27,18 +27,9 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Build iOS app
-        run: |
-          set -o pipefail
-          xcodebuild \
-            -project SoundCompass.xcodeproj \
-            -scheme SoundCompass-iOS \
-            -configuration Debug \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
-            build | xcpretty
-
-      - name: Run DSP unit tests
+      # `xcodebuild test` builds the app, the widget extension and the
+      # test bundle, so a separate build step would only repeat the work.
+      - name: Build and run unit tests
         run: |
           set -o pipefail
           xcodebuild test \
@@ -56,3 +47,29 @@ jobs:
           name: xcresult
           path: build/TestResults.xcresult
           retention-days: 7
+
+  watchos-build:
+    name: watchOS build
+    runs-on: macos-15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      # The watch app and complication are not part of the iOS scheme, so
+      # without this job they would never be compiled by CI.
+      - name: Build watch app and complication
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project SoundCompass.xcodeproj \
+            -scheme SoundCompass-watchOS \
+            -configuration Debug \
+            -destination 'generic/platform=watchOS Simulator' \
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO | xcpretty

@@ -105,10 +105,14 @@ final class GCCPHAT {
             vDSP_fft_zip(fftSetup, &leftSplit,  1, log2n, FFTDirection(kFFTDirection_Forward))
             vDSP_fft_zip(fftSetup, &rightSplit, 1, log2n, FFTDirection(kFFTDirection_Forward))
 
-            // Cross-spectrum X = R · conj(L), written into a dedicated
-            // output buffer. Swift's exclusive-access rule forbids aliasing
-            // the same `&var` as both input and output of `vDSP_zvmul`, so
-            // we use three distinct split-complex variables here.
+            // Cross-spectrum. `vDSP_zvmul` with conjugate flag -1 conjugates
+            // its *first* operand, so this computes X = conj(R) · L, whose
+            // inverse transform is c[k] = Σ l[n + k] · r[n]. That peaks at
+            // k = −τ when right[n] = left[n − τ] (left leads), which is why
+            // the scan below returns `-bestLag` to honour the documented
+            // "positive lag = left leads" convention. The buffer is a
+            // dedicated output because Swift's exclusive-access rule forbids
+            // aliasing the same `&var` as both input and output.
             vDSP_zvmul(&rightSplit, 1, &leftSplit, 1, &crossSplit, 1, vDSP_Length(fftSize), -1)
 
             // PHAT normalization: X[k] /= |X[k]|

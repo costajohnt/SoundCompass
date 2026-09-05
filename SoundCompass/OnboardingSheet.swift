@@ -68,8 +68,8 @@ struct OnboardingSheet: View {
 
 private struct OnboardingRow: View {
     let icon: String
-    let title: String
-    let text: String
+    let title: LocalizedStringKey
+    let text: LocalizedStringKey
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {

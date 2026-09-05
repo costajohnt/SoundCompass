@@ -11,17 +11,23 @@ struct DirectionUpdate: Equatable {
     var magnitude: Double
     var label: String?
     var timestamp: Date
+    /// `true` while the phone's hazard banner is up, so the watch can
+    /// escalate its haptic. Optional in the payload for compatibility
+    /// with older phone builds.
+    var isHazard: Bool
 
     init(
         direction: Double,
         magnitude: Double,
         label: String?,
-        timestamp: Date = Date()
+        timestamp: Date = Date(),
+        isHazard: Bool = false
     ) {
         self.direction = direction
         self.magnitude = magnitude
         self.label = label
         self.timestamp = timestamp
+        self.isHazard = isHazard
     }
 
     // MARK: - Dictionary bridging
@@ -31,6 +37,7 @@ struct DirectionUpdate: Equatable {
         static let magnitude = "magnitude"
         static let label = "label"
         static let timestamp = "timestamp"
+        static let isHazard = "hazard"
     }
 
     func toDictionary() -> [String: Any] {
@@ -40,6 +47,7 @@ struct DirectionUpdate: Equatable {
             Key.timestamp: timestamp.timeIntervalSince1970,
         ]
         if let label { dict[Key.label] = label }
+        if isHazard { dict[Key.isHazard] = true }
         return dict
     }
 
@@ -55,5 +63,6 @@ struct DirectionUpdate: Equatable {
         self.magnitude = magnitude
         self.label = dictionary[Key.label] as? String
         self.timestamp = Date(timeIntervalSince1970: ts)
+        self.isHazard = dictionary[Key.isHazard] as? Bool ?? false
     }
 }

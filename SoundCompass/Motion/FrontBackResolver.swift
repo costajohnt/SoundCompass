@@ -11,19 +11,28 @@ import Foundation
 /// With only two microphones we cannot measure elevation or front/back —
 /// the left/right cue `d = sin(θ)` has the same value for `θ = 30°` (front
 /// right) and `θ = 150°` (back right). The fix is to let the user rotate
-/// the phone. For a sound source truly in front of you, a clockwise yaw
-/// sweep makes `d` shrink (the source drifts to the left of the device);
-/// for a source behind you the same rotation makes `d` grow. The **sign**
-/// of `∂d / ∂yaw` therefore disambiguates front from back:
+/// the phone. CoreMotion's device frame is right-handed with `z` out of
+/// the screen, so with the phone flat and screen up **positive yaw is a
+/// counter-clockwise turn** seen from above. A CCW turn swings the phone's
+/// top edge to the left, so a world-fixed source *in front* drifts to the
+/// right of the device's forward axis: `d` grows with yaw. A source
+/// *behind* drifts the other way. The **sign** of `∂d / ∂yaw` therefore
+/// disambiguates front from back:
 ///
-/// * slope `< 0` → source is in front
-/// * slope `> 0` → source is behind
+/// * slope `> 0` → source is in front
+/// * slope `< 0` → source is behind
 /// * magnitude below `confidenceThreshold` or yaw hasn't changed much yet
 ///   → ambiguous; the user needs to rotate more.
 ///
+/// (An earlier version had these two cases swapped because it assumed
+/// clockwise = positive yaw.)
+///
 /// The regression runs over a short sliding window of
 /// `(unwrappedYaw, direction)` samples so the estimate updates continuously
-/// as the user moves the phone.
+/// as the user moves the phone. Once a `front`/`back` result is reached it
+/// is **latched** for `latchDuration`, otherwise the answer would vanish a
+/// couple of seconds after the user stops turning (the window's yaw range
+/// collapses and the resolver would fall back to "keep rotating").
 ///
 /// Yaw handling
 /// ------------
@@ -54,7 +63,8 @@ final class FrontBackResolver: ObservableObject {
     // MARK: - Tunables
 
     /// Maximum number of (yaw, direction) samples kept in the regression
-    /// window. At the 50 Hz update rate below, 60 samples ≈ 1.2 s.
+    /// window. Samples arrive once per DSP frame (~23 Hz for 2048-frame
+    /// buffers at 48 kHz), so 60 samples ≈ 2.6 s.
     private let maxSamples: Int = 60
 
     /// Minimum yaw range (in radians) required before a resolution other
@@ -65,17 +75,29 @@ final class FrontBackResolver: ObservableObject {
     /// we commit to front/back.
     private let confidenceThreshold: Double = 0.5
 
+    /// How long a `front`/`back` result survives after the window stops
+    /// supporting it.
+    let latchDuration: TimeInterval
+
     // MARK: - Private state
 
     private let motion: CMMotionManager
     private let queue: OperationQueue
+    private let now: () -> Date
 
     private var samples: [(yaw: Double, direction: Double)] = []
     private var previousRawYaw: Double?
     private var cumulativeYaw: Double = 0
+    private var latched: (resolution: Resolution, at: Date)?
 
-    init(motion: CMMotionManager = CMMotionManager()) {
+    init(
+        motion: CMMotionManager = CMMotionManager(),
+        latchDuration: TimeInterval = 10,
+        now: @escaping () -> Date = { Date() }
+    ) {
         self.motion = motion
+        self.latchDuration = latchDuration
+        self.now = now
         self.queue = OperationQueue()
         self.queue.name = "com.soundcompass.motion"
         self.queue.maxConcurrentOperationCount = 1
@@ -101,11 +123,11 @@ final class FrontBackResolver: ObservableObject {
         motion.deviceMotionUpdateInterval = 0.02  // 50 Hz
         motion.startDeviceMotionUpdates(to: queue) { [weak self] deviceMotion, error in
             if let error {
+                Log.motion.error("Device motion failed: \(error.localizedDescription, privacy: .public)")
                 DispatchQueue.main.async {
                     self?.isMotionAvailable = false
                     self?.resolution = .unknown
                 }
-                _ = error  // surface to logging pipeline in Logger batch
                 return
             }
             guard let self, let deviceMotion else { return }
@@ -115,27 +137,14 @@ final class FrontBackResolver: ObservableObject {
 
     func stop() {
         motion.stopDeviceMotionUpdates()
-        queue.addOperation { [weak self] in
-            guard let self else { return }
-            self.samples.removeAll(keepingCapacity: true)
-            self.previousRawYaw = nil
-            self.cumulativeYaw = 0
-            DispatchQueue.main.async {
-                self.resolution = .unknown
-                self.yawRangeDegrees = 0
-                self.slope = 0
-            }
-        }
+        reset()
     }
 
-    /// Clears the sample window. Must be called on the motion queue or
-    /// when no motion updates are active.
+    /// Clears the sample window and any latched result.
     func reset() {
         queue.addOperation { [weak self] in
             guard let self else { return }
-            self.samples.removeAll(keepingCapacity: true)
-            self.previousRawYaw = nil
-            self.cumulativeYaw = 0
+            self.clearState()
             DispatchQueue.main.async {
                 self.resolution = .unknown
                 self.yawRangeDegrees = 0
@@ -152,10 +161,7 @@ final class FrontBackResolver: ObservableObject {
     func recordDirection(_ direction: Double) {
         queue.addOperation { [weak self] in
             guard let self else { return }
-            self.samples.append((yaw: self.cumulativeYaw, direction: direction))
-            if self.samples.count > self.maxSamples {
-                self.samples.removeFirst(self.samples.count - self.maxSamples)
-            }
+            self.appendSample(yaw: self.cumulativeYaw, direction: direction)
             self.updateResolution()
         }
     }
@@ -174,6 +180,20 @@ final class FrontBackResolver: ObservableObject {
         previousRawYaw = rawYaw
     }
 
+    private func appendSample(yaw: Double, direction: Double) {
+        samples.append((yaw: yaw, direction: direction))
+        if samples.count > maxSamples {
+            samples.removeFirst(samples.count - maxSamples)
+        }
+    }
+
+    private func clearState() {
+        samples.removeAll(keepingCapacity: true)
+        previousRawYaw = nil
+        cumulativeYaw = 0
+        latched = nil
+    }
+
     // MARK: - Regression
 
     private func updateResolution() {
@@ -183,7 +203,8 @@ final class FrontBackResolver: ObservableObject {
         }
 
         // Yaw range over the current window. If the user hasn't rotated
-        // far enough, ask them to rotate more.
+        // far enough, ask them to rotate more — unless a recent result is
+        // still latched.
         let yaws = samples.map(\.yaw)
         let minYaw = yaws.min() ?? 0
         let maxYaw = yaws.max() ?? 0
@@ -191,7 +212,7 @@ final class FrontBackResolver: ObservableObject {
         let rangeDegrees = range * 180 / .pi
 
         guard range >= minYawRange else {
-            publish(.needsRotation(accumulatedDegrees: rangeDegrees), range: rangeDegrees, slope: 0)
+            publish(latchedOr(.needsRotation(accumulatedDegrees: rangeDegrees)), range: rangeDegrees, slope: 0)
             return
         }
 
@@ -205,22 +226,34 @@ final class FrontBackResolver: ObservableObject {
 
         let denominator = n * sumX2 - sumX * sumX
         guard denominator > 1e-9 else {
-            publish(.needsRotation(accumulatedDegrees: rangeDegrees), range: rangeDegrees, slope: 0)
+            publish(latchedOr(.needsRotation(accumulatedDegrees: rangeDegrees)), range: rangeDegrees, slope: 0)
             return
         }
 
         let computedSlope = (n * sumXY - sumX * sumY) / denominator
 
         let resolved: Resolution
-        if computedSlope < -confidenceThreshold {
+        if computedSlope > confidenceThreshold {
             resolved = .front
-        } else if computedSlope > confidenceThreshold {
+            latched = (.front, now())
+        } else if computedSlope < -confidenceThreshold {
             resolved = .back
+            latched = (.back, now())
         } else {
-            resolved = .needsRotation(accumulatedDegrees: rangeDegrees)
+            resolved = latchedOr(.needsRotation(accumulatedDegrees: rangeDegrees))
         }
 
         publish(resolved, range: rangeDegrees, slope: computedSlope)
+    }
+
+    /// The latched `front`/`back` result while it is still fresh,
+    /// otherwise `fallback`.
+    private func latchedOr(_ fallback: Resolution) -> Resolution {
+        if let latched, now().timeIntervalSince(latched.at) < latchDuration {
+            return latched.resolution
+        }
+        latched = nil
+        return fallback
     }
 
     private func publish(_ resolution: Resolution, range: Double, slope: Double) {
@@ -250,10 +283,7 @@ extension FrontBackResolver {
     func _injectForTesting(yaw: Double, direction: Double) {
         queue.addOperations([BlockOperation { [self] in
             self.cumulativeYaw = yaw
-            self.samples.append((yaw: yaw, direction: direction))
-            if self.samples.count > self.maxSamples {
-                self.samples.removeFirst(self.samples.count - self.maxSamples)
-            }
+            self.appendSample(yaw: yaw, direction: direction)
             self.updateResolution()
         }], waitUntilFinished: true)
         // Drain the main queue so @Published updates land before assertions.
@@ -263,9 +293,7 @@ extension FrontBackResolver {
     /// Test-only: synchronously reset state.
     func _resetForTesting() {
         queue.addOperations([BlockOperation { [self] in
-            self.samples.removeAll(keepingCapacity: true)
-            self.previousRawYaw = nil
-            self.cumulativeYaw = 0
+            self.clearState()
         }], waitUntilFinished: true)
         DispatchQueue.main.async { [self] in
             self.resolution = .unknown

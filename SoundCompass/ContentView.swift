@@ -165,16 +165,16 @@ struct ContentView: View {
     private var monoWarning: some View {
         warningBanner(
             icon: "exclamationmark.triangle.fill",
-            text: "This microphone only provides mono audio. Direction cannot be estimated — try the built-in mic instead of a headset."
+            text: Text("This microphone only provides mono audio. Direction cannot be estimated — try the built-in mic instead of a headset.")
         )
     }
 
     private func errorBanner(text: String) -> some View {
         Group {
-            if text.contains("denied") {
+            if detector.isPermissionDenied {
                 permissionDeniedBanner(text: text)
             } else {
-                warningBanner(icon: "mic.slash.fill", text: text)
+                warningBanner(icon: "mic.slash.fill", text: Text(verbatim: text))
             }
         }
     }
@@ -230,7 +230,7 @@ struct ContentView: View {
                 .font(.title2)
                 .foregroundStyle(.red)
             VStack(alignment: .leading, spacing: 2) {
-                Text(detector.hazardLabel ?? "Hazard sound")
+                Text(verbatim: detector.hazardLabel ?? String(localized: "Hazard sound"))
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
                 Text("Detected \(DirectionLabel.label(for: detector.direction).lowercased()).")
@@ -255,7 +255,7 @@ struct ContentView: View {
         let degrees = Int((detector.direction * 90).rounded())
         let loudnessPct = Int(detector.magnitude * 100)
         return VStack(spacing: 4) {
-            Text(label)
+            Text(verbatim: label)
                 .font(.title3.weight(.medium))
                 .fontDesign(.rounded)
                 .foregroundStyle(.white)
@@ -279,10 +279,10 @@ struct ContentView: View {
         HStack(spacing: 8) {
             Image(systemName: "waveform.badge.magnifyingglass")
                 .foregroundStyle(.cyan)
-            Text(label)
+            Text(verbatim: label)
                 .font(.callout.weight(.semibold))
                 .fontDesign(.rounded)
-            Text("\(Int(confidence * 100))%")
+            Text(verbatim: "\(Int(confidence * 100))%")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.white.opacity(0.6))
         }
@@ -328,7 +328,7 @@ struct ContentView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func frontBackCopy() -> (icon: String, tint: Color, title: String, detail: String) {
+    private func frontBackCopy() -> (icon: String, tint: Color, title: LocalizedStringKey, detail: LocalizedStringKey) {
         if !detector.frontBackResolver.isMotionAvailable {
             return (
                 "gyroscope",
@@ -389,11 +389,11 @@ struct ContentView: View {
         }
     }
 
-    private func warningBanner(icon: String, text: String) -> some View {
+    private func warningBanner(icon: String, text: Text) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
                 .foregroundStyle(.yellow)
-            Text(text)
+            text
                 .font(.footnote)
                 .foregroundStyle(.white.opacity(0.85))
         }
@@ -410,7 +410,7 @@ struct ContentView: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "mic.slash.fill")
                     .foregroundStyle(.yellow)
-                Text(text)
+                Text(verbatim: text)
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.85))
                     .fixedSize(horizontal: false, vertical: true)
@@ -484,9 +484,9 @@ struct ContentView: View {
     /// sounds.
     private func announceHazardToVoiceOver() {
         guard UIAccessibility.isVoiceOverRunning else { return }
-        let label = detector.hazardLabel ?? "Hazard sound"
+        let label = detector.hazardLabel ?? String(localized: "Hazard sound")
         let direction = DirectionLabel.spokenPhrase(direction: detector.direction)
-        let phrase = "\(label) detected \(direction)"
+        let phrase = String(localized: "\(label) detected \(direction)")
         UIAccessibility.post(notification: .announcement, argument: phrase)
     }
 
@@ -522,6 +522,9 @@ struct ContentView: View {
             let pattern = try CHHapticPattern(events: [buzz] + taps, parameters: [])
             let player = try engine.makePlayer(with: pattern)
             try player.start(atTime: 0)
+            // The Taptic Engine is audible to the mics; keep the pattern
+            // (0.6 s) plus a short tail out of the direction estimate.
+            detector.muteInput(for: 0.75)
         } catch {
             // Haptics are advisory; ignore failures.
         }
@@ -549,6 +552,7 @@ struct ContentView: View {
             let player = try engine.makePlayer(with: pattern)
             try player.start(atTime: 0)
             lastHapticTime = Date()
+            detector.muteInput(for: 0.08)
         } catch {
             // Haptics are advisory; ignore failures.
         }
@@ -562,7 +566,7 @@ private struct BandRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text(result.band.name)
+            Text(LocalizedStringKey(result.band.name))
                 .font(.caption.weight(.medium))
                 .foregroundStyle(isDominant ? .white : .white.opacity(0.7))
                 .frame(width: 52, alignment: .leading)
@@ -578,7 +582,7 @@ private struct BandRow: View {
             }
             .frame(height: 6)
 
-            Text(arrow(for: result.direction))
+            Text(verbatim: arrow(for: result.direction))
                 .font(.caption.weight(.bold))
                 .foregroundStyle(isDominant ? .cyan : .white.opacity(0.6))
                 .frame(width: 24, alignment: .trailing)

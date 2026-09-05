@@ -7,6 +7,39 @@ done on Linux, so nothing here was compiled or run on a device; CI on
 `main` is green (run #9, 2026-08-01), so the project builds and the 75
 unit tests pass on the iOS 26 simulator.
 
+## 0. Status (2026-09-05 follow-up)
+
+Every finding below has been acted on in the same branch. Where a fix
+could be completed from the code alone it is done; where the audit
+called for device measurement, the tooling and switches for that
+measurement are in place and the default behaviour is unchanged.
+
+| Finding | Status |
+|---|---|
+| H1 front/back sign | Fixed; tests use the physical convention, latch added (M4) |
+| H2 Bluetooth passthrough | Fixed: `.allowBluetoothA2DP`, 10 ms I/O buffer while connected |
+| H3 watch complication | Fixed: App Group suite + entitlements, reload throttle; watch still not embedded by default (needs paid account) |
+| H4 stale hazard label | Fixed: `ClassifierLabelTracker` expiry + `HazardGate` |
+| H5 hazard identifiers | Fixed: curated list validated against `knownClassifications` in CI, keyword rules added |
+| H6 diluted ILD | Tooling done: band-limited ILD option, per-band ILD in the trace, calibration stores per-device gain. **Default stays broadband until measured on ≥2 devices** (README/RUNBOOK describe the experiment) |
+| M1 route restart loop | Fixed: input-signature guard |
+| M2 invalid format crash | Fixed: guard + Swift error; `ObjCExceptionCatcher` removed |
+| M3 self-excitation | Fixed: mute during speech and after haptics |
+| M4 un-latching | Fixed: 10 s latch |
+| M5 localization | Fixed: call sites localize; Spanish extended to all screens |
+| M6 watchOS CI | Fixed: `SoundCompass-watchOS` scheme + job |
+| M7 notification entitlement | Fixed: entitlements file, `.default` sound |
+| M8 settings copy | Fixed: copy reworded; watch hazard tap implemented |
+| M9 calibration source | Fixed: shared `AudioSessionConfigurator`, clip carries sign |
+| M10 duplicated smoother | Fixed: `DirectionSmoother` |
+| M11 dropped frames | Fixed: chunked processing |
+| M12 tap-thread work | Reduced: per-band GCC-PHAT removed, map removed; remaining per-buffer allocations documented |
+| L1–L9 | Fixed (docs, comments, unused code, CSV export, watch staleness, tests without sleeps, realistic-ILD tests) |
+
+Still requiring a device: confirming H1 on hardware, the H6
+measurements, MFi hearing-device routing for passthrough, and battery
+in long background sessions.
+
 ## 1. Bottom line
 
 The codebase is well organised, allocation-conscious, documented, and
