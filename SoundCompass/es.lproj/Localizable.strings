@@ -131,7 +131,11 @@
 "right" = "a la derecha";
 "far right" = "muy a la derecha";
 "%@ %@" = "%@ %@";
-"Sound from your %@" = "Sonido %@";
+"Sound from your far left" = "Sonido muy a la izquierda";
+"Sound from your left" = "Sonido a la izquierda";
+"Sound ahead" = "Sonido delante";
+"Sound from your right" = "Sonido a la derecha";
+"Sound from your far right" = "Sonido muy a la derecha";
 
 // MARK: - Controls
 

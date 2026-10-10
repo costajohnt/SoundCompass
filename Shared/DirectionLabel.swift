@@ -31,6 +31,19 @@ enum DirectionLabel {
         }
     }
 
+    /// Full spoken sentence for an unlabeled sound. Each bucket is its own
+    /// localized sentence so the centre reads "Sound ahead" rather than
+    /// interpolating "ahead" into "Sound from your …".
+    static func spokenSentence(direction: Double) -> String {
+        switch direction {
+        case ..<(-0.66): return String(localized: "Sound from your far left")
+        case ..<(-0.20): return String(localized: "Sound from your left")
+        case ..<(0.20):  return String(localized: "Sound ahead")
+        case ..<(0.66):  return String(localized: "Sound from your right")
+        default:         return String(localized: "Sound from your far right")
+        }
+    }
+
     /// Accessibility value string combining direction and loudness.
     static func accessibilityValue(direction: Double, magnitude: Double) -> String {
         let bucket = spokenPhrase(direction: direction)

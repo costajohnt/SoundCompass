@@ -120,7 +120,11 @@
 "right" = "right";
 "far right" = "far right";
 "%@ %@" = "%@ %@";
-"Sound from your %@" = "Sound from your %@";
+"Sound from your far left" = "Sound from your far left";
+"Sound from your left" = "Sound from your left";
+"Sound ahead" = "Sound ahead";
+"Sound from your right" = "Sound from your right";
+"Sound from your far right" = "Sound from your far right";
 "Microphone access denied." = "Microphone access denied.";
 "Could not start recording: %@" = "Could not start recording: %@";
 "Could not start audio: %@" = "Could not start audio: %@";

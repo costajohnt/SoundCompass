@@ -75,8 +75,7 @@ struct AnnounceDirectionIntent: AppIntent {
             guard let detector = IntentBroker.detector, detector.isRunning else {
                 return "SoundCompass is not listening right now."
             }
-            let word = DirectionLabel.spokenPhrase(direction: detector.direction)
-            return "Sound from your \(word)."
+            return DirectionLabel.spokenSentence(direction: detector.direction) + "."
         }
         return .result(dialog: IntentDialog(stringLiteral: phrase))
     }

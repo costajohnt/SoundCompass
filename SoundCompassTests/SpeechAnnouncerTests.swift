@@ -77,6 +77,18 @@ final class SpeechAnnouncerTests: XCTestCase {
         XCTAssertEqual(spoken(), ["Sound from your left"])
     }
 
+    func testCenteredPhraseWithoutLabelIsGrammatical() {
+        let (announcer, spoken) = silentAnnouncer()
+        announcer.announce(direction: 0, magnitude: 0.9, label: nil)
+        XCTAssertEqual(spoken(), ["Sound ahead"])
+    }
+
+    func testFarRightPhraseWithoutLabel() {
+        let (announcer, spoken) = silentAnnouncer()
+        announcer.announce(direction: 0.9, magnitude: 0.9, label: "")
+        XCTAssertEqual(spoken(), ["Sound from your far right"])
+    }
+
     func testSecondAnnouncementInsideMinIntervalIsDropped() {
         let (announcer, spoken) = silentAnnouncer(minInterval: 2.0)
         let t0 = Date(timeIntervalSince1970: 1_000)

@@ -48,7 +48,9 @@ final class SpeechAnnouncer: NSObject {
     private let directionHysteresis: Double = 0.3
 
     private var lastAnnouncement: Date = .distantPast
-    private var lastDirection: Double = 0
+    // nil until the first announcement, so a first sound that is centred and
+    // unlabeled (matching the old 0 / nil defaults) is still announced.
+    private var lastDirection: Double?
     private var lastLabel: String?
 
     init(minInterval: TimeInterval = 2.0) {
@@ -62,9 +64,11 @@ final class SpeechAnnouncer: NSObject {
         guard magnitude >= loudnessThreshold else { return }
         guard now.timeIntervalSince(lastAnnouncement) > minInterval else { return }
 
-        let directionChanged = abs(direction - lastDirection) >= directionHysteresis
-        let labelChanged = label != lastLabel
-        guard directionChanged || labelChanged else { return }
+        if let lastDirection {
+            let directionChanged = abs(direction - lastDirection) >= directionHysteresis
+            let labelChanged = label != lastLabel
+            guard directionChanged || labelChanged else { return }
+        }
 
         let phrase = buildPhrase(direction: direction, label: label)
         onPhrase?(phrase)
@@ -90,11 +94,11 @@ final class SpeechAnnouncer: NSObject {
     }
 
     private func buildPhrase(direction: Double, label: String?) -> String {
-        let locationWord = DirectionLabel.spokenPhrase(direction: direction)
         if let label, !label.isEmpty {
+            let locationWord = DirectionLabel.spokenPhrase(direction: direction)
             return String(localized: "\(label.lowercased()) \(locationWord)")
         } else {
-            return String(localized: "Sound from your \(locationWord)")
+            return DirectionLabel.spokenSentence(direction: direction)
         }
     }
 
