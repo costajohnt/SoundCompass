@@ -145,6 +145,18 @@ final class AudioDirectionDetector: ObservableObject {
             }
             .store(in: &settingsCancellables)
 
+        // Turning hazard alerts on asks for notification permission right
+        // away, in the foreground, rather than on the first background
+        // hazard (which the prompt would then swallow).
+        settings.$hazardAlerts
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                guard let self, enabled, !self.sceneInBackground else { return }
+                self.hazardNotifier.requestAuthorizationIfNeeded()
+            }
+            .store(in: &settingsCancellables)
+
         // Mute the mic path while the phone is talking.
         announcer.onSpeakingChanged = { [weak self] speaking in
             self?.setSpeechMute(speaking)
@@ -241,6 +253,12 @@ final class AudioDirectionDetector: ObservableObject {
     func start() {
         guard !isRunning, !isStarting else { return }
         isStarting = true
+
+        // Ask for notification permission while the user is looking, so
+        // the first background hazard notifies instead of prompting.
+        if settings.hazardAlerts && !sceneInBackground {
+            hazardNotifier.requestAuthorizationIfNeeded()
+        }
 
         AVAudioApplication.requestRecordPermission { [weak self] granted in
             DispatchQueue.main.async {
@@ -423,6 +441,8 @@ final class AudioDirectionDetector: ObservableObject {
     /// Resumes the resolver if we're still capturing audio.
     func handleForegroundTransition() {
         sceneInBackground = false
+        // The user may have changed notification permission in Settings.
+        hazardNotifier.refreshAuthorization()
         guard isRunning else { return }
         frontBackResolver.start()
     }
