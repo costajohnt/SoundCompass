@@ -90,11 +90,11 @@ final class SpeechAnnouncer: NSObject {
     }
 
     private func buildPhrase(direction: Double, label: String?) -> String {
-        let locationWord = DirectionLabel.spokenPhrase(direction: direction)
         if let label, !label.isEmpty {
+            let locationWord = DirectionLabel.spokenPhrase(direction: direction)
             return String(localized: "\(label.lowercased()) \(locationWord)")
         } else {
-            return String(localized: "Sound from your \(locationWord)")
+            return DirectionLabel.spokenSentence(direction: direction)
         }
     }
 

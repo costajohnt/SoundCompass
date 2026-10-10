@@ -20,6 +20,14 @@ final class DirectionLabelTests: XCTestCase {
         XCTAssertEqual(DirectionLabel.spokenPhrase(direction:  0.9), "far right")
     }
 
+    func testSpokenSentenceBuckets() {
+        XCTAssertEqual(DirectionLabel.spokenSentence(direction: -0.9), "Sound from your far left")
+        XCTAssertEqual(DirectionLabel.spokenSentence(direction: -0.3), "Sound from your left")
+        XCTAssertEqual(DirectionLabel.spokenSentence(direction:  0.0), "Sound ahead")
+        XCTAssertEqual(DirectionLabel.spokenSentence(direction:  0.4), "Sound from your right")
+        XCTAssertEqual(DirectionLabel.spokenSentence(direction:  0.9), "Sound from your far right")
+    }
+
     func testAccessibilityValueMentionsBothDirectionAndLoudness() {
         let value = DirectionLabel.accessibilityValue(direction: -0.8, magnitude: 0.5)
         XCTAssertTrue(value.contains("far left"))
