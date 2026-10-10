@@ -18,14 +18,38 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Show Xcode version
-        run: xcodebuild -version
+      # The runner image's default Xcode can lag the simulators the tests
+      # need (an image update left the default at 16.4, with no iPhone 17
+      # simulator). Use the newest non-beta Xcode installed on the runner.
+      - name: Select newest Xcode
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app | grep -iv beta | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
 
       - name: Install XcodeGen
         run: brew install xcodegen
 
       - name: Generate Xcode project
         run: xcodegen generate
+
+      # Prefer an iPhone 17 Pro simulator, else the first available iPhone,
+      # so a runner image without that exact model still runs the tests.
+      - name: Pick iOS simulator
+        run: |
+          SIM_ID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devs = [d for rt, ds in json.load(sys.stdin)["devices"].items()
+                  if "iOS" in rt for d in ds if d["name"].startswith("iPhone")]
+          pref = [d for d in devs if d["name"] == "iPhone 17 Pro"]
+          print((pref or devs)[0]["udid"] if devs else "")
+          ')
+          if [ -z "$SIM_ID" ]; then
+            echo "No iPhone simulator available" >&2
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "SIM_ID=$SIM_ID" >> "$GITHUB_ENV"
 
       # `xcodebuild test` builds the app, the widget extension and the
       # test bundle, so a separate build step would only repeat the work.
@@ -36,7 +60,7 @@ jobs:
             -project SoundCompass.xcodeproj \
             -scheme SoundCompass-iOS \
             -configuration Debug \
-            -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=latest' \
+            -destination "platform=iOS Simulator,id=$SIM_ID" \
             CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
             -resultBundlePath build/TestResults.xcresult | xcpretty
 
